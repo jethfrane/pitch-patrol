@@ -1,13 +1,8 @@
-// Run from the project root. Uses sharp from a locally supplied path; not a runtime dependency.
-import sharp from '../../jethrofrane-website/node_modules/sharp/dist/index.mjs';
+// Run from the project root after npm ci. Rebuilds the share artwork from the included gameplay capture.
+import sharp from 'sharp';
 import { mkdir, copyFile } from 'node:fs/promises';
 const base = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630"><rect width="1200" height="630" fill="#172b47"/><circle cx="1110" cy="50" r="240" fill="#36d6c5" opacity=".06"/><circle cx="80" cy="650" r="300" fill="#36d6c5" opacity=".04"/><g font-family="Arial,sans-serif"><text x="60" y="205" font-size="13" letter-spacing="2.5" fill="#9de8dd">OPEN-SOURCE MUSIC EXPERIMENT</text><text x="57" y="284" font-size="61" font-weight="700" letter-spacing="-2" fill="#f8fcff">Pitch Patrol</text><text x="60" y="345" font-size="25" fill="#baf9e9">Find your note.</text><text x="60" y="381" font-size="25" fill="#baf9e9">Defend the garden.</text><text x="60" y="443" font-size="16" fill="#b4c5d7">Your voice is the controller.</text><text x="60" y="470" font-size="16" fill="#b4c5d7">A small experiment by Jethro Frane.</text><text x="550" y="549" font-size="11" letter-spacing="1.5" fill="#b4c5d7">ACTUAL BROWSER CAPTURE</text><text x="60" y="575" font-size="17" fill="#f8fcff">pitch-patrol.jethrofrane.xyz</text></g><rect x="538" y="166" width="608" height="350" rx="18" fill="#f8fcff"/></svg>`;
-const screenshot = await sharp('artifacts/desktop.png').resize(592,334,{fit:'contain',background:'#dcecf9'}).png().toBuffer();
+const screenshot = await sharp('public/gameplay.webp').resize(592,334,{fit:'contain',background:'#dcecf9'}).png().toBuffer();
 const icon = await sharp('public/icon.svg').resize(96,96).png().toBuffer();
 await sharp(Buffer.from(base)).composite([{input:screenshot,left:546,top:174},{input:icon,left:60,top:60}]).png().toFile('public/og.png');
-await sharp('artifacts/desktop.png').webp({quality:88}).toFile('public/gameplay.webp');
-const site = '../jethrofrane-website/public/projects/pitch-patrol';
-await mkdir(site,{recursive:true});
-await copyFile('public/og.png',`${site}/cover.png`);
-await copyFile('public/gameplay.webp',`${site}/gameplay.webp`);
-await copyFile('public/icon.svg',`${site}/icon.svg`);
+
