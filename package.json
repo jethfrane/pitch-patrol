@@ -1,7 +1,7 @@
 {
   "name": "pitch-patrol",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173 --host",
@@ -16,6 +16,12 @@
     "@types/three": "^0.170.0",
     "tsx": "^4.23.15",
     "typescript": "^5.6.3",
-    "vite": "^5.4.10"
+    "vite": "8.3.4"
+  },
+  "license": "MIT",
+  "description": "An open-source 3D browser experiment in musical pitch practice",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jethfrane/pitch-patrol.git"
   }
 }

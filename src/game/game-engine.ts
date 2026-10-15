@@ -42,6 +42,7 @@ export class GameEngine {
   private combo = 1.0;
   private wave = 1;
   private survivalTime = 0;
+  public practiceMode = false;
   private totalAttacksFired = 0;
   private successfulHits = 0;
 
@@ -70,11 +71,17 @@ export class GameEngine {
       this.bestScore = 0;
     }
 
+    soundSynth.isMuted = true;
+    soundSynth.sfxVolume = 0.25;
     this.initThree();
     this.initHUD(uiContainer);
     this.setupHealthCallbacks();
     this.setupPitchCallbacks();
     this.setupResize();
+    this.pitchDetector.onInputInterrupted = () => { if (this.isRunning && !this.isPaused && this.inputMode === 'mic') this.togglePause(); };
+    document.addEventListener('visibilitychange', () => { if (document.hidden && this.isRunning && !this.isPaused) this.togglePause(); });
+    window.addEventListener('pagehide', () => { this.pitchDetector.stopMic(); soundSynth.releaseAllPianoNotes(); });
+    this.canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); if (this.isRunning && !this.isPaused) this.togglePause(); });
 
     this.lastTime = performance.now();
     this.renderLoop();
@@ -84,7 +91,7 @@ export class GameEngine {
     // 1. Scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xA9CEF4); // Cheerful sky
-    this.scene.fog = new THREE.FogExp2(0xA9CEF4, 0.012);
+    this.scene.fog = new THREE.FogExp2(0xA9CEF4, 0.002);
 
     // 2. Camera: 65° Orthographic Top-Down
     const aspect = window.innerWidth / window.innerHeight;
@@ -109,21 +116,34 @@ export class GameEngine {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.25;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // 4. Subsystems
     this.arena = new Arena(this.scene);
     this.guardian = new Guardian(this.scene);
+    this.guardian.group.scale.setScalar(1.5);
     this.particles = new ParticleSystem(this.scene);
   }
 
   private initHUD(uiContainer: HTMLElement): void {
     this.hud = new HUD(uiContainer, {
       onStartGame: () => this.startGame(),
+      onEndGame: () => this.gameOver(),
       onRestartGame: () => this.restartGame(),
       onTogglePause: () => this.togglePause(),
-      onToggleMic: async () => {
-        return await this.pitchDetector.initMic();
+      onToggleMic: async (deviceId) => this.pitchDetector.initMic(deviceId),
+      onListDevices: () => this.pitchDetector.listDevices(),
+      onOpenSettings: () => { if (this.isRunning && !this.isPaused) this.togglePause(); },
+      onPracticeChange: practice => { this.practiceMode = practice; },
+      onReference: note => {
+        if (!this.practiceMode) return;
+        this.pitchDetector.suspendScoring(1250);
+        const muted = soundSynth.isMuted; soundSynth.isMuted = false;
+        soundSynth.startPianoNote(note);
+        setTimeout(() => soundSynth.stopPianoNote(note), 650);
+        soundSynth.isMuted = muted;
       },
       onCalibrateNoise: async (onProgress) => {
         return await this.pitchDetector.calibrateNoiseFloor(onProgress);
@@ -134,14 +154,16 @@ export class GameEngine {
           this.executeAuthorizedAttack(note);
         }
       },
-      onPianoNoteDown: (note: string) => {
-        soundSynth.startPianoNote(note);
+      onPianoNoteDown: (note: string, octave) => {
+        soundSynth.startPianoNote(note, octave);
       },
-      onPianoNoteUp: (note: string) => {
-        soundSynth.stopPianoNote(note);
+      onPianoNoteUp: (note: string, octave) => {
+        soundSynth.stopPianoNote(note, octave);
       },
       onChangeInputMode: (mode: GameInputMode) => {
         this.inputMode = mode;
+        this.pitchDetector.stateMachine.reset();
+        try { this.bestScore = Number(localStorage.getItem(`pitch_patrol_best_${mode}_${this.practiceMode}`)) || 0; } catch { this.bestScore = 0; }
         if (mode === 'piano') {
           this.pitchDetector.stopMic();
         }
@@ -172,9 +194,7 @@ export class GameEngine {
       if (!this.isReducedMotion) {
         this.triggerCameraShake();
       }
-      if (remainingHp <= 0) {
-        this.gameOver();
-      }
+
     };
 
     this.playerHealth.onDeath = () => {
@@ -198,21 +218,31 @@ export class GameEngine {
   }
 
   private setupResize(): void {
-    window.addEventListener('resize', () => {
-      const aspect = window.innerWidth / window.innerHeight;
-      this.camera.left = (-this.frustumSize * aspect) / 2;
-      this.camera.right = (this.frustumSize * aspect) / 2;
-      this.camera.top = this.frustumSize / 2;
-      this.camera.bottom = -this.frustumSize / 2;
+    const resize = () => {
+      const width = window.innerWidth;
+      const top = document.getElementById('top-hud')?.getBoundingClientRect().bottom || 70;
+      const bottom = window.innerHeight - (document.getElementById('bottom-hud')?.getBoundingClientRect().top || window.innerHeight - 150);
+      const height = Math.max(100, window.innerHeight - top - bottom);
+      const aspect = width / height;
+      const worldHeight = Math.max(49 / aspect, 44);
+      this.camera.left = -worldHeight * aspect / 2; this.camera.right = worldHeight * aspect / 2;
+      this.camera.top = worldHeight / 2; this.camera.bottom = -worldHeight / 2;
       this.camera.updateProjectionMatrix();
-
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+      this.renderer.setSize(width, height);
+      this.canvas.style.top = `${top}px`;
+    };
+    window.addEventListener('resize', resize);
+    new ResizeObserver(resize).observe(document.getElementById('bottom-hud')!);
+    resize();
   }
 
   public startGame(): void {
     this.isRunning = true;
     this.isPaused = false;
+    this.hud.showPause(false);
+    this.hud.setPlaying(true);
+    this.pitchDetector.stateMachine.reset();
+    try { this.bestScore = Number(localStorage.getItem(`pitch_patrol_best_${this.inputMode}_${this.practiceMode}`)) || 0; } catch { this.bestScore = 0; }
     this.score = 0;
     this.totalAttacksFired = 0;
     this.successfulHits = 0;
@@ -235,14 +265,16 @@ export class GameEngine {
   public togglePause(): void {
     if (!this.isRunning) return;
     this.isPaused = !this.isPaused;
+    this.pitchDetector.stateMachine.reset();
+    this.hud.setPlaying(!this.isPaused);
     this.hud.showPause(this.isPaused);
   }
 
   private startWave(waveNum: number): void {
     this.wave = waveNum;
     this.waveEnemiesSpawned = 0;
-    this.waveTotalEnemies = 4 + waveNum * 3;
-    this.spawnCooldown = Math.max(0.9, 2.5 - waveNum * 0.12);
+    this.waveTotalEnemies = Math.min(28, 4 + waveNum * 3);
+    this.spawnCooldown = Math.max(1.3, 2.8 - waveNum * 0.12);
     this.spawnTimer = 0.5;
     this.hud.updateWave(this.wave);
     soundSynth.playWaveTransition();
@@ -301,6 +333,9 @@ export class GameEngine {
       damage = 12;
     }
 
+    speed = Math.min(speed, 3.8);
+    if (this.wave === 1) speed *= 0.65;
+
     // Distribute spawn angle
     const spawnAngle = Math.random() * Math.PI * 2;
     const enemy = new Enemy(
@@ -311,7 +346,7 @@ export class GameEngine {
 
     // Hook up boundary attack impact
     enemy.onAttackImpact = (_atkEnemy, dmg) => {
-      this.playerHealth.takeDamage(dmg);
+      if (!this.practiceMode) this.playerHealth.takeDamage(dmg);
     };
 
     this.enemies.push(enemy);
@@ -336,7 +371,8 @@ export class GameEngine {
 
     // Smart Targeting: Prioritize living enemies that are NOT already targeted by an in-flight projectile
     const untargeted = matchingEnemies.filter(e => !e.isTargetedByProjectile);
-    const candidateList = untargeted.length > 0 ? untargeted : matchingEnemies;
+    const candidateList = untargeted;
+    if (candidateList.length === 0) return;
 
     // Prioritize lowest time to impact
     candidateList.sort(
@@ -352,7 +388,7 @@ export class GameEngine {
     // Sound
     soundSynth.playPulse(matchedNote);
     // Briefly suspend mic scoring during pulse sound to prevent speaker loop hits
-    this.pitchDetector.suspendScoring(220);
+    if (!soundSynth.isMuted && this.inputMode === 'mic') this.pitchDetector.suspendScoring(300);
 
     // Fire 3D Projectile
     const staffTipPos = this.guardian.getStaffTipWorldPosition();
@@ -420,21 +456,19 @@ export class GameEngine {
   }
 
   private gameOver(): void {
+    if (!this.isRunning) return;
     this.isRunning = false;
+    this.pitchDetector.stateMachine.reset();
     soundSynth.playGameOver();
-
-    const accuracy = this.totalAttacksFired > 0
-      ? Math.round((this.successfulHits / this.totalAttacksFired) * 100)
-      : 100;
 
     if (this.score > this.bestScore) {
       this.bestScore = this.score;
       try {
-        localStorage.setItem('pitch_patrol_best_score', this.bestScore.toString());
+        localStorage.setItem(`pitch_patrol_best_${this.inputMode}_${this.practiceMode}`, this.bestScore.toString());
       } catch {}
     }
 
-    this.hud.showGameOver(this.score, this.wave, this.bestScore, accuracy);
+    this.hud.showGameOver(this.score, this.wave, this.bestScore, this.successfulHits);
   }
 
   private renderLoop = (): void => {
@@ -446,8 +480,12 @@ export class GameEngine {
 
     // Pitch detector audio buffer update (only if in mic mode)
     if (this.inputMode === 'mic') {
+      if (!this.isRunning || this.isPaused) this.pitchDetector.suspendScoring(80);
       this.pitchDetector.update(dt);
+      this.hud.updateInputStatus(this.pitchDetector.status);
     }
+
+    this.hud.updatePiano(dt);
 
     // Player health timer update
     this.playerHealth.update(dt);
@@ -457,7 +495,7 @@ export class GameEngine {
       this.hud.updateTimer(this.survivalTime);
 
       // Spawner logic
-      if (this.waveEnemiesSpawned < this.waveTotalEnemies) {
+      if (this.waveEnemiesSpawned < this.waveTotalEnemies && this.enemies.length < 8) {
         this.spawnTimer -= dt;
         if (this.spawnTimer <= 0) {
           this.spawnEnemy();
@@ -479,7 +517,7 @@ export class GameEngine {
         const dist = enemy.getDistanceToCenter();
         if (dist <= this.arena.protectiveRadius + 2.0 && enemy.state !== 'dying') {
           threatNear = true;
-          if (Math.random() < 0.02) soundSynth.playProximityWarning();
+          // Visual boundary warning remains active without repetitive microphone leakage.
         }
 
         if (dist <= this.arena.protectiveRadius + 0.6 && enemy.state !== 'dying' && enemy.state !== 'defeated') {

@@ -71,7 +71,7 @@ export class PitchMatchStateMachine {
     confidence: number,
     dt: number
   ): StateMachineStatus {
-    const dtMs = dt * 1000;
+    const dtMs = Math.max(0, Math.min(Number.isFinite(dt) ? dt : 0, 0.08)) * 1000;
 
     // Handle Rearm Cooldown first
     if (this.state === 'rearm') {
@@ -92,13 +92,13 @@ export class PitchMatchStateMachine {
     }
 
     // Check if input is valid, confident, and in-tune
-    const isValidInput = detectedNote !== null && confidence >= this.config.minConfidence;
+    const isValidInput = detectedNote !== null && Number.isFinite(cents) && Number.isFinite(confidence) && confidence >= this.config.minConfidence;
     const isInTune = isValidInput && Math.abs(cents) <= this.config.toleranceCents;
 
     if (isInTune && detectedNote) {
       this.lastCents = cents;
 
-      if (this.candidateNote === detectedNote) {
+      if (this.candidateNote === detectedNote && this.candidateOctave === octave) {
         // Sustaining current candidate
         this.dropoutTimerMs = 0;
         this.holdTimerMs += dtMs;
@@ -152,7 +152,7 @@ export class PitchMatchStateMachine {
       candidateNote: this.candidateNote,
       centsOffset: this.lastCents,
       holdProgress: progress,
-      inTune: Math.abs(this.lastCents) <= this.config.toleranceCents,
+      inTune: (this.state === 'candidate' || this.state === 'holding') && this.dropoutTimerMs === 0 && Math.abs(this.lastCents) <= this.config.toleranceCents,
       canAttack
     };
   }

@@ -27,11 +27,12 @@ export class NoteBadge {
     const material = new THREE.SpriteMaterial({
       map: this.texture,
       transparent: true,
-      depthTest: false
+      depthTest: false,
+      toneMapped: false
     });
 
     this.sprite = new THREE.Sprite(material);
-    this.sprite.scale.set(2.2, 1.1, 1);
+    this.sprite.scale.set(6.2, 3.1, 1);
     this.renderBadge();
   }
 
@@ -85,7 +86,7 @@ export class NoteBadge {
     // Note Text
     ctx.fillStyle = this.isTargeted ? '#17213A' : '#18233F';
     // Slightly adjust font size if text has accidentals like C♯ or chord like Am
-    const fontSize = this.noteText.length > 2 ? 46 : 54;
+    const fontSize = this.noteText.length > 2 ? 76 : 90;
     ctx.font = `900 ${fontSize}px "Quicksand", system-ui, -apple-system, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';

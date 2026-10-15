@@ -157,3 +157,24 @@ test('8. Enharmonic accidental normalization', () => {
   assert.equal(normalizeNoteName('C#'), 'C♯');
   assert.equal(normalizeNoteName('F#'), 'F♯');
 });
+
+test('9. A long stalled frame cannot authorize an attack', () => {
+  const sm = new PitchMatchStateMachine(); let hits = 0; sm.onAttackAuthorized = () => hits++;
+  sm.update('C',4,0,1,0.016); sm.update('C',4,0,1,2);
+  assert.equal(hits,0);
+});
+test('10. Changing octave does not accumulate a false stable hold', () => {
+  const sm = new PitchMatchStateMachine(); let hits = 0; sm.onAttackAuthorized = () => hits++;
+  for(let i=0;i<25;i++) sm.update('C', i%2 ? 3 : 4, 0,1,0.016);
+  assert.equal(hits,0);
+});
+test('11. Sustain requires a new full hold window after cooldown', () => {
+  const sm = new PitchMatchStateMachine(); let hits=0; sm.onAttackAuthorized=()=>hits++;
+  for(let i=0;i<120;i++) sm.update('A',4,0,1,0.016);
+  assert.ok(hits>=2 && hits<=4);
+});
+test('12. NaN confidence and cents cannot authorize attacks',()=>{
+  const sm=new PitchMatchStateMachine(); let hits=0; sm.onAttackAuthorized=()=>hits++;
+  for(let i=0;i<50;i++) sm.update('C',4,NaN,NaN,0.016);
+  assert.equal(hits,0);
+});

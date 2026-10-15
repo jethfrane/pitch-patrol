@@ -64,6 +64,7 @@ export class Enemy {
     this.badge = new NoteBadge(this.note);
     this.badge.sprite.position.set(0, 2.5, 0);
     this.group.add(this.badge.sprite);
+    this.group.scale.setScalar(1.25);
 
     // Telegraph light
     this.telegraphLight = new THREE.PointLight(0xFF8493, 0, 5);

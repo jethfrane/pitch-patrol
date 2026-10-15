@@ -1,749 +1,170 @@
-/**
- * Pitch Patrol - Comprehensive HUD, Authentic Piano & Settings System
- */
-
 import { soundSynth } from '../audio/sound-synth';
-import { PitchDetectionResult } from '../audio/pitch-detector';
-
+import { PitchDetectionResult, InputStatus } from '../audio/pitch-detector';
+import { PitchMatchStateMachine } from '../audio/pitch-match-state-machine';
 export type GameInputMode = 'mic' | 'piano';
-
 export interface HUDCallbacks {
-  onStartGame: () => void;
-  onRestartGame: () => void;
-  onTogglePause: () => void;
-  onToggleMic: () => Promise<boolean>;
-  onCalibrateNoise: (onProgress: (p: number) => void) => Promise<number>;
+  onEndGame: () => void; onStartGame: () => void; onRestartGame: () => void; onTogglePause: () => void;
+  onToggleMic: (deviceId?: string) => Promise<boolean>;
+  onCalibrateNoise: (progress: (p: number) => void) => Promise<number>;
+  onListDevices: () => Promise<MediaDeviceInfo[]>;
   onPianoAttack: (note: string) => void;
-  onPianoNoteDown: (note: string) => void;
-  onPianoNoteUp: (note: string) => void;
+  onPianoNoteDown: (note: string, octave?: number) => void; onPianoNoteUp: (note: string, octave?: number) => void;
   onChangeInputMode: (mode: GameInputMode) => void;
-  onUpdateTolerance: (cents: number) => void;
-  onUpdateSensitivity: (mult: number) => void;
-  onToggleReducedMotion: (enabled: boolean) => void;
+  onUpdateTolerance: (cents: number) => void; onUpdateSensitivity: (mult: number) => void;
+  onToggleReducedMotion: (enabled: boolean) => void; onPracticeChange: (practice: boolean) => void;
+  onReference: (note: string) => void; onOpenSettings: () => void;
 }
-
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+const keys = [ ['C','a',0],['C♯','w',0],['D','s',1],['D♯','e',1],['E','d',2],['F','f',3],['F♯','t',3],['G','g',4],['G♯','y',4],['A','h',5],['A♯','u',5],['B','j',6],['C','k',7] ] as const;
+const keyMap = new Map<string, {note: string; octave: number}>(keys.map(([note,key,index]) => [key, { note, octave: index === 7 ? 5 : 4 }]));
 export class HUD {
-  private container: HTMLElement;
-  private callbacks: HUDCallbacks;
-
   public currentMode: GameInputMode = 'mic';
-
-  // Top HUD elements
-  private healthBarFill!: HTMLElement;
-  private healthValueEl!: HTMLElement;
-  private scoreEl!: HTMLElement;
-  private comboEl!: HTMLElement;
-  private waveEl!: HTMLElement;
-  private timerEl!: HTMLElement;
-  private pauseBtn!: HTMLButtonElement;
-  private soundBtn!: HTMLButtonElement;
-  private settingsBtn!: HTMLButtonElement;
-
-  // Bottom HUD elements
-  private targetBadgeEl!: HTMLElement;
-  private detectedBadgeEl!: HTMLElement;
-  private tuningNeedleEl!: HTMLElement;
-  private tuningStatusEl!: HTMLElement;
-  private holdProgressRing!: HTMLElement;
-  private micToggleBtn!: HTMLButtonElement;
-  private micVolumeBar!: HTMLElement;
-
-  // Piano elements
-  private pianoContainer!: HTMLElement;
-  private toggleLabelsBtn!: HTMLButtonElement;
-  private toggleKeysBtn!: HTMLButtonElement;
-  private showLabels = false;
-  private showKeyHints = false;
-
-  // Modals & Banners
-  private startModal!: HTMLElement;
-  private gameOverModal!: HTMLElement;
-  private pauseModal!: HTMLElement;
-  private settingsModal!: HTMLElement;
-  private finalScoreEl!: HTMLElement;
-  private bestScoreEl!: HTMLElement;
-  private finalWaveEl!: HTMLElement;
-  private finalAccuracyEl!: HTMLElement;
-  private waveBannerEl!: HTMLElement;
-  private waveBannerTitleEl!: HTMLElement;
-  private waveBannerSubEl!: HTMLElement;
-
-  // Key tracking to prevent OS key-repeat cheating
-  private heldKeyboardKeys: Set<string> = new Set();
-  private multiKeyMashTimer = 0;
-
-  constructor(container: HTMLElement, callbacks: HUDCallbacks) {
-    this.container = container;
-    this.callbacks = callbacks;
-    this.buildHTML();
-    this.attachEvents();
+  private held = new Map<string, {note: string; octave: number}>();
+  private matcher = new PitchMatchStateMachine({ requiredHoldMs: 320 });
+  private currentTarget: string | null = null;
+  private active = false;
+  private bannerTimer = 0;
+  private lastDiagnostics = 0;
+  constructor(private container: HTMLElement, private callbacks: HUDCallbacks) {
+    this.build(); this.events();
+    this.matcher.onAttackAuthorized = note => { if (this.currentMode === 'piano' && this.active) callbacks.onPianoAttack(note); };
   }
-
-  private buildHTML(): void {
+  private build() {
     this.container.innerHTML = `
-      <!-- TOP HUD -->
-      <div id="top-hud" class="hud-panel top-bar">
-        <!-- Health Section -->
-        <div class="hud-group health-group">
-          <div class="health-card">
-            <span class="heart-icon">💖</span>
-            <div class="health-bar-track">
-              <div id="health-bar-fill" class="health-bar-fill"></div>
-            </div>
-            <span id="health-value" class="health-value">100</span>
-          </div>
-        </div>
-
-        <!-- Center Wave & Timer -->
-        <div class="hud-group center-group">
-          <div class="hud-item wave-box">
-            <span class="hud-label">WAVE</span>
-            <span id="hud-wave" class="hud-value">01</span>
-          </div>
-          <div class="hud-item timer-box">
-            <span class="hud-label">TIME</span>
-            <span id="hud-timer" class="hud-value">00:00</span>
-          </div>
-        </div>
-
-        <!-- Right Score & Actions -->
-        <div class="hud-group actions-group">
-          <div class="hud-item score-box">
-            <span class="hud-label">SCORE</span>
-            <span id="hud-score" class="hud-value">0</span>
-          </div>
-          <div id="hud-combo" class="hud-badge combo-badge">x1.0</div>
-          <button id="btn-sound" class="hud-btn" title="Toggle Sound">🔊</button>
-          <button id="btn-settings" class="hud-btn" title="Settings">⚙️</button>
-          <button id="btn-pause" class="hud-btn" title="Pause Game">⏸</button>
-        </div>
-      </div>
-
-      <!-- BOTTOM HUD -->
-      <div id="bottom-hud" class="hud-panel bottom-bar">
-        <!-- Mode Switcher Tabs -->
-        <div class="mode-switcher">
-          <button id="tab-mic" class="mode-tab active">🎤 Vocal Survival</button>
-          <button id="tab-piano" class="mode-tab">🎹 Piano Survival & Practice</button>
-        </div>
-
-        <!-- TUNING & HOLD STATUS (MIC MODE) -->
-        <div id="mic-hud-section" class="tuner-row">
-          <!-- Urgent Target -->
-          <div class="target-card">
-            <span class="card-caption">APPROACHING THREAT</span>
-            <div id="target-note-badge" class="note-pill target-pill">--</div>
-          </div>
-
-          <!-- Needle Tuning Gauge & Hold Progress -->
-          <div class="gauge-card">
-            <div class="gauge-labels">
-              <span>FLAT</span>
-              <span id="tune-status">SING & HOLD PITCH</span>
-              <span>SHARP</span>
-            </div>
-            <div class="gauge-track">
-              <div class="center-target-line"></div>
-              <div id="tuning-needle" class="gauge-needle"></div>
-            </div>
-
-            <!-- Hold Progress Bar -->
-            <div class="hold-progress-track" title="Hold steady to fire!">
-              <div id="hold-progress-fill" class="hold-progress-fill"></div>
-            </div>
-          </div>
-
-          <!-- Your Detected Pitch -->
-          <div class="detected-card">
-            <span class="card-caption">YOUR PITCH</span>
-            <div id="detected-note-badge" class="note-pill detected-pill">--</div>
-          </div>
-
-          <!-- Mic Controls -->
-          <div class="mic-controls-mini">
-            <button id="btn-mic-toggle" class="mic-btn active" title="Toggle Microphone">
-              <span class="mic-icon">🎤</span>
-              <span class="mic-text">On</span>
-            </button>
-            <div class="mic-meter"><div id="mic-meter-fill"></div></div>
-          </div>
-        </div>
-
-        <!-- AUTHENTIC PIANO KEYBOARD (PIANO MODE) -->
-        <div id="piano-hud-section" class="piano-section hidden">
-          <div class="piano-toolbar">
-            <span class="piano-hint">Play or tap keys to sound musical notes and attack targets!</span>
-            <div class="piano-toggles">
-              <button id="btn-toggle-labels" class="mini-btn">Show Note Labels: OFF</button>
-              <button id="btn-toggle-hints" class="mini-btn">Show Key Hints: OFF</button>
-            </div>
-          </div>
-
-          <!-- Authentic Piano Keys (White & Black Layout) -->
-          <div class="piano-keyboard" id="piano-keyboard">
-            <!-- C4 to B4 Octave -->
-            <div class="piano-key white" data-note="C" data-key="a"><span class="key-label">C</span><span class="key-hint">A</span></div>
-            <div class="piano-key black" data-note="C♯" data-key="w"><span class="key-label">C♯</span><span class="key-hint">W</span></div>
-            <div class="piano-key white" data-note="D" data-key="s"><span class="key-label">D</span><span class="key-hint">S</span></div>
-            <div class="piano-key black" data-note="D♯" data-key="e"><span class="key-label">D♯</span><span class="key-hint">E</span></div>
-            <div class="piano-key white" data-note="E" data-key="d"><span class="key-label">E</span><span class="key-hint">D</span></div>
-            <div class="piano-key white" data-note="F" data-key="f"><span class="key-label">F</span><span class="key-hint">F</span></div>
-            <div class="piano-key black" data-note="F♯" data-key="t"><span class="key-label">F♯</span><span class="key-hint">T</span></div>
-            <div class="piano-key white" data-note="G" data-key="g"><span class="key-label">G</span><span class="key-hint">G</span></div>
-            <div class="piano-key black" data-note="G♯" data-key="y"><span class="key-label">G♯</span><span class="key-hint">Y</span></div>
-            <div class="piano-key white" data-note="A" data-key="h"><span class="key-label">A</span><span class="key-hint">H</span></div>
-            <div class="piano-key black" data-note="A♯" data-key="u"><span class="key-label">A♯</span><span class="key-hint">U</span></div>
-            <div class="piano-key white" data-note="B" data-key="j"><span class="key-label">B</span><span class="key-hint">J</span></div>
-            <!-- High C5 -->
-            <div class="piano-key white" data-note="C" data-key="k"><span class="key-label">C5</span><span class="key-hint">K</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- START MODAL -->
-      <div id="modal-start" class="modal-overlay">
-        <div class="modal-card">
-          <div class="modal-badge">🎵 3D MUSICAL SURVIVAL</div>
-          <h1 class="modal-title">PITCH PATROL</h1>
-          <p class="modal-subtitle">Protect Melody Garden by singing or playing the notes shown above approaching musical creatures!</p>
-          
-          <div class="instruction-grid">
-            <div class="instruction-step">
-              <span class="step-num">1</span>
-              <div>
-                <strong>Intentional Pitch Matching:</strong> Hold your sung pitch steady for ~300ms. The game rejects random noises and transient sweeps.
-              </div>
-            </div>
-            <div class="instruction-step">
-              <span class="step-num">2</span>
-              <div>
-                <strong>Health-Based Survival:</strong> You have 100 HP. Enemies attack the boundary with wind-up cycles instead of instant death.
-              </div>
-            </div>
-            <div class="instruction-step">
-              <span class="step-num">3</span>
-              <div>
-                <strong>Headphone Recommendation:</strong> 🎧 Wear headphones for best pitch recognition so your speakers don't bleed into the mic.
-              </div>
-            </div>
-          </div>
-
-          <div class="modal-actions">
-            <button id="btn-start" class="primary-btn">▶ START CONCERT</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- SETTINGS MODAL -->
-      <div id="modal-settings" class="modal-overlay hidden">
-        <div class="modal-card">
-          <div class="modal-badge">AUDIO & GAMEPLAY SETTINGS</div>
-          <h2>SETTINGS</h2>
-
-          <div class="settings-list">
-            <!-- Noise Calibration -->
-            <div class="setting-item">
-              <div class="setting-info">
-                <strong>Ambient Noise Calibration</strong>
-                <span>Measures room background noise to prevent false hits.</span>
-              </div>
-              <button id="btn-calibrate" class="secondary-btn">🎙️ Calibrate (1s)</button>
-            </div>
-            <div id="calibration-bar-track" class="progress-track hidden">
-              <div id="calibration-bar-fill" class="progress-fill"></div>
-            </div>
-
-            <!-- Pitch Tolerance -->
-            <div class="setting-item">
-              <div class="setting-info">
-                <strong>Pitch Tolerance Window</strong>
-                <span>Choose standard tuning (±35c) or beginner-friendly (±45c).</span>
-              </div>
-              <select id="select-tolerance" class="hud-select">
-                <option value="35" selected>Standard (±35 cents)</option>
-                <option value="45">Beginner (±45 cents)</option>
-                <option value="25">Expert (±25 cents)</option>
-              </select>
-            </div>
-
-            <!-- Mic Sensitivity -->
-            <div class="setting-item">
-              <div class="setting-info">
-                <strong>Microphone Sensitivity</strong>
-                <span id="label-sensitivity">1.0x</span>
-              </div>
-              <input type="range" id="range-sensitivity" min="0.5" max="2.5" step="0.1" value="1.0" class="hud-slider" />
-            </div>
-
-            <!-- Master Volumes -->
-            <div class="setting-item">
-              <div class="setting-info">
-                <strong>SFX Volume</strong>
-                <span id="label-sfx-vol">60%</span>
-              </div>
-              <input type="range" id="range-sfx-vol" min="0" max="1" step="0.05" value="0.6" class="hud-slider" />
-            </div>
-
-            <div class="setting-item">
-              <div class="setting-info">
-                <strong>Piano Volume</strong>
-                <span id="label-piano-vol">70%</span>
-              </div>
-              <input type="range" id="range-piano-vol" min="0" max="1" step="0.05" value="0.7" class="hud-slider" />
-            </div>
-
-            <!-- Reduced Motion -->
-            <div class="setting-item">
-              <div class="setting-info">
-                <strong>Reduced Motion & Shake</strong>
-                <span>Disables camera effects and intense flashing.</span>
-              </div>
-              <input type="checkbox" id="check-reduced-motion" class="hud-checkbox" />
-            </div>
-          </div>
-
-          <button id="btn-close-settings" class="primary-btn">DONE</button>
-        </div>
-      </div>
-
-      <!-- PAUSE MODAL -->
-      <div id="modal-pause" class="modal-overlay hidden">
-        <div class="modal-card mini">
-          <h2>GAME PAUSED</h2>
-          <p>Catch your breath! Resume when ready to sing or play.</p>
-          <button id="btn-resume" class="primary-btn">RESUME</button>
-        </div>
-      </div>
-
-      <!-- CELEBRATORY WAVE BANNER -->
-      <div id="wave-banner" class="wave-banner hidden">
-        <span id="wave-banner-sub" class="wave-banner-sub">GET READY</span>
-        <h1 id="wave-banner-title" class="wave-banner-title">WAVE 01</h1>
-      </div>
-
-      <!-- GAME OVER MODAL -->
-      <div id="modal-gameover" class="modal-overlay hidden">
-        <div class="modal-card">
-          <div class="modal-badge danger">HEALTH DEPLETED</div>
-          <h2>CONCERT FINISHED</h2>
-          
-          <div class="stats-grid">
-            <div class="stat-card">
-              <span class="stat-label">FINAL SCORE</span>
-              <span id="final-score" class="stat-val">0</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">BEST SCORE</span>
-              <span id="best-score" class="stat-val">0</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">WAVES SURVIVED</span>
-              <span id="final-wave" class="stat-val">01</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">ACCURACY</span>
-              <span id="final-accuracy" class="stat-val">100%</span>
-            </div>
-          </div>
-
-          <button id="btn-retry" class="primary-btn">🔄 PLAY AGAIN</button>
-        </div>
-      </div>
-    `;
-
-    // Cache elements
-    this.healthBarFill = document.getElementById('health-bar-fill')!;
-    this.healthValueEl = document.getElementById('health-value')!;
-    this.scoreEl = document.getElementById('hud-score')!;
-    this.comboEl = document.getElementById('hud-combo')!;
-    this.waveEl = document.getElementById('hud-wave')!;
-    this.timerEl = document.getElementById('hud-timer')!;
-    this.pauseBtn = document.getElementById('btn-pause') as HTMLButtonElement;
-    this.soundBtn = document.getElementById('btn-sound') as HTMLButtonElement;
-    this.settingsBtn = document.getElementById('btn-settings') as HTMLButtonElement;
-
-    this.targetBadgeEl = document.getElementById('target-note-badge')!;
-    this.detectedBadgeEl = document.getElementById('detected-note-badge')!;
-    this.tuningNeedleEl = document.getElementById('tuning-needle')!;
-    this.tuningStatusEl = document.getElementById('tune-status')!;
-    this.holdProgressRing = document.getElementById('hold-progress-fill')!;
-    this.micToggleBtn = document.getElementById('btn-mic-toggle') as HTMLButtonElement;
-    this.micVolumeBar = document.getElementById('mic-meter-fill')!;
-
-    this.pianoContainer = document.getElementById('piano-hud-section')!;
-    this.toggleLabelsBtn = document.getElementById('btn-toggle-labels') as HTMLButtonElement;
-    this.toggleKeysBtn = document.getElementById('btn-toggle-hints') as HTMLButtonElement;
-
-    this.startModal = document.getElementById('modal-start')!;
-    this.pauseModal = document.getElementById('modal-pause')!;
-    this.settingsModal = document.getElementById('modal-settings')!;
-    this.gameOverModal = document.getElementById('modal-gameover')!;
-    this.finalScoreEl = document.getElementById('final-score')!;
-    this.bestScoreEl = document.getElementById('best-score')!;
-    this.finalWaveEl = document.getElementById('final-wave')!;
-    this.finalAccuracyEl = document.getElementById('final-accuracy')!;
-
-    this.waveBannerEl = document.getElementById('wave-banner')!;
-    this.waveBannerTitleEl = document.getElementById('wave-banner-title')!;
-    this.waveBannerSubEl = document.getElementById('wave-banner-sub')!;
+      <header id="top-hud" class="top-bar">
+        <a class="game-brand" href="https://jethrofrane.xyz/work/pitch-patrol" target="_blank" rel="noopener"><img src="/icon.svg" width="34" height="34" alt=""><span>pitch<span class="brand-light">patrol</span></span></a>
+        <div class="health-card"><span aria-hidden="true">♥</span><div class="health-bar-track"><div id="health-bar-fill" class="health-bar-fill"></div></div><span id="health-value">100</span><span class="sr-only">health points</span></div>
+        <div class="run-stats"><span><small>WAVE</small><b id="hud-wave">01</b></span><span><small>TIME</small><b id="hud-timer">00:00</b></span><span><small>SCORE</small><b id="hud-score">0</b></span><b id="hud-combo" class="combo-badge">×1.0</b></div>
+        <div class="hud-actions"><button id="btn-sound" class="hud-btn" aria-label="Enable sound">Sound off</button><button id="btn-settings" class="hud-btn" aria-label="Input and game settings">Settings</button><button id="btn-pause" class="hud-btn" aria-label="Pause game">Ⅱ</button></div>
+      </header>
+      <div id="wave-banner" class="wave-banner hidden"><span id="wave-banner-sub">MELODY GARDEN</span><h2 id="wave-banner-title">Wave 01</h2></div>
+      <section id="bottom-hud" class="bottom-bar">
+        <div class="mode-switcher"><button id="tab-mic" class="mode-tab active">Vocal</button><button id="tab-piano" class="mode-tab">Piano</button><span id="session-label" class="session-label">Survival · any octave</span><button id="btn-reference" class="mini-btn hidden">Hear target</button></div>
+        <div id="mic-hud-section" class="tuner-row"><div class="target-card"><span class="card-caption">NEXT THREAT</span><strong id="target-note-badge" class="note-pill">—</strong></div><div class="gauge-card"><div class="gauge-labels"><span>FLAT</span><span id="tune-status">Connect your microphone</span><span>SHARP</span></div><div class="gauge-track"><div class="center-target-line"></div><div id="tuning-needle" class="gauge-needle"></div></div><div class="hold-progress-track"><div id="hold-progress-fill" class="hold-progress-fill"></div></div><p id="input-message" class="input-message">A steady note charges your attack.</p></div><div class="detected-card"><span class="card-caption">YOUR NOTE</span><strong id="detected-note-badge" class="note-pill detected-pill">—</strong></div><button id="btn-mic-toggle" class="mic-btn">Connect mic</button></div>
+        <div id="piano-hud-section" class="piano-section hidden"><div class="piano-toolbar"><span id="piano-status">Hold one key steadily to fire.</span><button id="btn-toggle-labels" class="mini-btn">Note names: off</button><button id="btn-toggle-hints" class="mini-btn">Key hints: off</button></div><div class="piano-keyboard" id="piano-keyboard" role="group" aria-label="Piano keyboard">${keys.map(([note,key,index]) => `<button class="piano-key ${note.includes('♯') ? 'black' : 'white'}" style="--key-index:${index}" data-key="${key}" data-note="${note}" data-octave="${index === 7 ? 5 : 4}" aria-label="Play ${note}${index === 7 ? 5 : 4}"><span class="key-label">${note}</span><span class="key-hint">${key.toUpperCase()}</span></button>`).join('')}</div></div>
+      </section>
+      <div id="modal-start" class="modal-overlay"><section class="modal-card welcome-card" aria-labelledby="welcome-title"><img src="/icon.svg" class="welcome-icon" alt="Pitch Patrol logo" width="76" height="76"><div class="modal-badge">AN OPEN-SOURCE MUSIC EXPERIMENT</div><h1 id="welcome-title" class="modal-title">Find your note.<br><em>Defend the garden.</em></h1><p class="modal-subtitle">Hum a steady pitch to send a musical pulse toward the matching creature. A little listening. A little survival.</p><div class="setup-options"><label>Play with<select id="start-input"><option value="mic">Your microphone</option><option value="piano">On-screen piano</option></select></label><label>Session<select id="start-session"><option value="survival">Survival · 100 health</option><option value="practice">Practice · no damage</option></select></label></div><button id="btn-start" class="primary-btn">Enter Melody Garden <span aria-hidden="true">↗</span></button><p id="start-error" class="error-message" role="status"></p><div class="welcome-notes"><span>Headphones recommended</span><span>Audio stays on your device</span></div><p class="experiment-note">Astra medium for planning · Argon in Gemini Tasks for the prototype · Codex for release improvements. Experimental pitch practice, not a graded music assessment.</p><div class="welcome-links"><a href="https://github.com/jethfrane/pitch-patrol" target="_blank" rel="noopener">Source & feedback ↗</a><a href="https://jethrofrane.xyz/work/pitch-patrol" target="_blank" rel="noopener">The experiment ↗</a></div></section></div>
+      <div id="modal-settings" class="modal-overlay hidden"><section class="modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div class="modal-badge">MAKE YOURSELF HEARD</div><h2 id="settings-title">Input check</h2><p class="modal-subtitle">Connect, check your signal, then hum comfortably. Game pauses while settings are open.</p><label class="setting-item">Microphone<select id="select-device"><option value="">Default microphone</option></select></label><div class="input-check"><div class="meter-track"><div id="mic-meter-fill"></div></div><p id="device-label">No microphone connected</p><p id="settings-input-status" role="status">Connect your microphone to begin.</p><div class="inline-actions"><button id="btn-connect" class="secondary-btn">Connect / reconnect</button><button id="btn-calibrate" class="secondary-btn">Calibrate quiet room</button></div></div><label class="setting-item">Pitch tolerance<select id="select-tolerance"><option value="35">Standard · ±35 cents</option><option value="45">Beginner · ±45 cents</option><option value="25">Precise · ±25 cents</option></select></label><label class="setting-item">Sensitivity <span id="label-sensitivity">1.0×</span><input id="range-sensitivity" type="range" min="0.5" max="3" step="0.1" value="1"></label><label class="setting-item">Sound effects<input id="range-sfx-vol" type="range" min="0" max="1" step="0.05" value="0.25"></label><label class="setting-item">Piano volume<input id="range-piano-vol" type="range" min="0" max="1" step="0.05" value="0.7"></label><label class="setting-item">Reduced motion<input id="check-reduced-motion" type="checkbox"></label><details class="diagnostics"><summary>Input diagnostics</summary><p>Requested: automatic gain, noise suppression and echo cancellation off. Reported settings below may be unavailable; OS or hardware processing can remain.</p><pre id="input-diagnostics">No input yet.</pre></details><button id="btn-close-settings" class="primary-btn">Back to garden</button></section></div>
+      <div id="modal-pause" class="modal-overlay hidden"><section class="modal-card compact-card"><div class="modal-badge">TAKE A BREATH</div><h2>Garden paused</h2><p id="pause-message">Your notes can wait.</p><button id="btn-resume" class="primary-btn">Resume</button><button id="btn-pause-settings" class="secondary-btn">Check microphone</button><button id="btn-end-session" class="secondary-btn">End session</button></section></div>
+      <div id="modal-gameover" class="modal-overlay hidden"><section class="modal-card compact-card"><div class="modal-badge">ONE MORE MELODY?</div><h2>Patrol complete.</h2><div class="stats-grid"><div class="stat-card"><span>Score</span><b id="final-score">0</b></div><div class="stat-card"><span>Best in this mode</span><b id="best-score">0</b></div><div class="stat-card"><span>Wave reached</span><b id="final-wave">1</b></div><div class="stat-card"><span>Creatures harmonized</span><b id="final-hits">0</b></div></div><p class="experiment-note">Scores reflect this session and its settings. They are not a measure of singing ability.</p><button id="btn-retry" class="primary-btn">Play again</button><button id="btn-menu" class="secondary-btn">Change session</button></section></div>`;
   }
-
-  private attachEvents(): void {
-    // Start button
-    document.getElementById('btn-start')?.addEventListener('click', async () => {
-      this.startModal.classList.add('hidden');
-      if (this.currentMode === 'mic') {
-        await this.callbacks.onToggleMic();
+  private async connect(deviceId?: string) {
+    $('btn-connect').textContent = 'Connecting…';
+    const ok = await this.callbacks.onToggleMic(deviceId);
+    $('btn-connect').textContent = 'Connect / reconnect';
+    if (ok) {
+      const devices = await this.callbacks.onListDevices();
+      const select = $<HTMLSelectElement>('select-device');
+      const previous = deviceId || select.value;
+      select.replaceChildren(new Option('Default microphone', ''), ...devices.map((d,i) => new Option(d.label || `Microphone ${i+1}`, d.deviceId)));
+      select.value = previous;
+    }
+    return ok;
+  }
+  private events() {
+    $('btn-start').onclick = async () => {
+      const button = $<HTMLButtonElement>('btn-start'); button.disabled = true; button.textContent = 'Getting ready…';
+      soundSynth.initCtx();
+      this.setMode($<HTMLSelectElement>('start-input').value as GameInputMode);
+      if (this.currentMode === 'piano') { soundSynth.isMuted = false; $('btn-sound').textContent = 'Sound on'; }
+      const practice = $<HTMLSelectElement>('start-session').value === 'practice';
+      this.callbacks.onPracticeChange(practice);
+      $('session-label').textContent = `${practice ? 'Practice' : 'Survival'} · any octave`;
+      $('btn-reference').classList.toggle('hidden', !practice);
+      if (this.currentMode === 'mic' && !await this.connect()) {
+        $('start-error').textContent = 'Microphone unavailable. Check browser permission or choose the piano to try the game.';
+        button.disabled = false; button.textContent = 'Try again'; return;
       }
-      this.callbacks.onStartGame();
-    });
-
-    // Pause / Resume
-    this.pauseBtn.addEventListener('click', () => this.callbacks.onTogglePause());
-    document.getElementById('btn-resume')?.addEventListener('click', () => this.callbacks.onTogglePause());
-
-    // Settings
-    this.settingsBtn.addEventListener('click', () => this.settingsModal.classList.remove('hidden'));
-    document.getElementById('btn-close-settings')?.addEventListener('click', () => this.settingsModal.classList.add('hidden'));
-
-    // Retry
-    document.getElementById('btn-retry')?.addEventListener('click', () => {
-      this.gameOverModal.classList.add('hidden');
-      this.callbacks.onRestartGame();
-    });
-
-    // Sound toggle
-    this.soundBtn.addEventListener('click', () => {
-      soundSynth.isMuted = !soundSynth.isMuted;
-      this.soundBtn.textContent = soundSynth.isMuted ? '🔇' : '🔊';
-    });
-
-    // Mic toggle button
-    this.micToggleBtn.addEventListener('click', async () => {
-      const active = await this.callbacks.onToggleMic();
-      this.micToggleBtn.classList.toggle('active', active);
-      this.micToggleBtn.querySelector('.mic-text')!.textContent = active ? 'On' : 'Off';
-    });
-
-    // Mode Switcher Tabs
-    const tabMic = document.getElementById('tab-mic')!;
-    const tabPiano = document.getElementById('tab-piano')!;
-    const micSection = document.getElementById('mic-hud-section')!;
-
-    tabMic.addEventListener('click', async () => {
-      this.currentMode = 'mic';
-      tabMic.classList.add('active');
-      tabPiano.classList.remove('active');
-      micSection.classList.remove('hidden');
-      this.pianoContainer.classList.add('hidden');
-      await this.callbacks.onToggleMic();
-      this.callbacks.onChangeInputMode('mic');
-    });
-
-    tabPiano.addEventListener('click', () => {
-      this.currentMode = 'piano';
-      tabPiano.classList.add('active');
-      tabMic.classList.remove('active');
-      micSection.classList.add('hidden');
-      this.pianoContainer.classList.remove('hidden');
-      this.callbacks.onChangeInputMode('piano');
-    });
-
-    // Piano Toggles
-    this.toggleLabelsBtn.addEventListener('click', () => {
-      this.showLabels = !this.showLabels;
-      this.toggleLabelsBtn.textContent = `Show Note Labels: ${this.showLabels ? 'ON' : 'OFF'}`;
-      this.pianoContainer.classList.toggle('show-labels', this.showLabels);
-    });
-
-    this.toggleKeysBtn.addEventListener('click', () => {
-      this.showKeyHints = !this.showKeyHints;
-      this.toggleKeysBtn.textContent = `Show Key Hints: ${this.showKeyHints ? 'ON' : 'OFF'}`;
-      this.pianoContainer.classList.toggle('show-hints', this.showKeyHints);
-    });
-
-    // Piano key interactions with full glissando / drag support
-    const keys = document.querySelectorAll('.piano-key');
-    let activePointerKey: HTMLElement | null = null;
-    let isPointerPressed = false;
-
-    const playKey = (keyEl: HTMLElement) => {
-      const note = keyEl.dataset.note;
-      if (!note) return;
-      if (activePointerKey === keyEl) return;
-
-      if (activePointerKey) {
-        const oldNote = activePointerKey.dataset.note;
-        activePointerKey.classList.remove('active');
-        if (oldNote) this.callbacks.onPianoNoteUp(oldNote);
-      }
-
-      activePointerKey = keyEl;
-      keyEl.classList.add('active');
-      this.callbacks.onPianoNoteDown(note);
-      if (this.currentMode === 'piano') {
-        this.callbacks.onPianoAttack(note);
-      }
+      $('start-error').textContent = ''; $('modal-start').classList.add('hidden');
+      button.disabled = false; button.textContent = 'Enter Melody Garden ↗'; this.callbacks.onStartGame();
     };
-
-    const stopActiveKey = () => {
-      if (activePointerKey) {
-        const note = activePointerKey.dataset.note;
-        activePointerKey.classList.remove('active');
-        if (note) this.callbacks.onPianoNoteUp(note);
-        activePointerKey = null;
-      }
+    $('btn-pause').onclick = $('btn-resume').onclick = () => this.callbacks.onTogglePause();
+    const settings = () => { this.callbacks.onOpenSettings(); $('modal-settings').classList.remove('hidden'); };
+    $('btn-settings').onclick = $('btn-pause-settings').onclick = settings;
+    $('btn-close-settings').onclick = () => $('modal-settings').classList.add('hidden');
+    $('btn-end-session').onclick = () => { $('modal-pause').classList.add('hidden'); this.callbacks.onEndGame(); };
+    $('btn-retry').onclick = () => { $('modal-gameover').classList.add('hidden'); this.callbacks.onRestartGame(); };
+    $('btn-menu').onclick = () => { $('modal-gameover').classList.add('hidden'); $('modal-start').classList.remove('hidden'); this.releaseKeys(); };
+    $('btn-sound').onclick = () => { soundSynth.isMuted = !soundSynth.isMuted; $('btn-sound').textContent = soundSynth.isMuted ? 'Sound off' : 'Sound on'; $('btn-sound').setAttribute('aria-label', soundSynth.isMuted ? 'Enable sound' : 'Mute sound'); if (soundSynth.isMuted) soundSynth.releaseAllPianoNotes(); };
+    $('btn-mic-toggle').onclick = () => { settings(); void this.connect(); };
+    $('btn-connect').onclick = () => void this.connect($<HTMLSelectElement>('select-device').value);
+    $<HTMLSelectElement>('select-device').onchange = () => void this.connect($<HTMLSelectElement>('select-device').value);
+    $('btn-calibrate').onclick = async () => {
+      const button = $<HTMLButtonElement>('btn-calibrate'); button.disabled = true;
+      try { if (await this.connect()) await this.callbacks.onCalibrateNoise(p => { button.textContent = `Stay quiet… ${Math.round(p * 100)}%`; }); }
+      finally { button.disabled = false; button.textContent = 'Calibrate quiet room'; }
     };
-
-    keys.forEach(keyEl => {
-      const htmlKey = keyEl as HTMLElement;
-      htmlKey.addEventListener('pointerdown', (e: Event) => {
-        e.preventDefault();
-        isPointerPressed = true;
-        playKey(htmlKey);
-      });
-
-      htmlKey.addEventListener('pointerenter', () => {
-        if (isPointerPressed) {
-          playKey(htmlKey);
-        }
-      });
+    $('tab-mic').onclick = async () => { this.callbacks.onOpenSettings(); this.setMode('mic'); await this.connect(); };
+    $('tab-piano').onclick = () => { this.callbacks.onOpenSettings(); this.setMode('piano'); soundSynth.isMuted = false; $('btn-sound').textContent = 'Sound on'; soundSynth.initCtx(); };
+    $('btn-toggle-labels').onclick = () => { const on = $('piano-hud-section').classList.toggle('show-labels'); $('btn-toggle-labels').textContent = `Note names: ${on ? 'on' : 'off'}`; };
+    $('btn-toggle-hints').onclick = () => { const on = $('piano-hud-section').classList.toggle('show-hints'); $('btn-toggle-hints').textContent = `Key hints: ${on ? 'on' : 'off'}`; };
+    $('btn-reference').onclick = () => { if (this.currentTarget) this.callbacks.onReference(this.currentTarget); };
+    $<HTMLSelectElement>('select-tolerance').onchange = () => { const value = +$<HTMLSelectElement>('select-tolerance').value; this.matcher.setTolerance(value); this.callbacks.onUpdateTolerance(value); };
+    $<HTMLInputElement>('range-sensitivity').oninput = () => { const value = +$<HTMLInputElement>('range-sensitivity').value; $('label-sensitivity').textContent = `${value.toFixed(1)}×`; this.callbacks.onUpdateSensitivity(value); };
+    $<HTMLInputElement>('range-sfx-vol').oninput = () => soundSynth.sfxVolume = +$<HTMLInputElement>('range-sfx-vol').value;
+    $<HTMLInputElement>('range-piano-vol').oninput = () => soundSynth.pianoVolume = +$<HTMLInputElement>('range-piano-vol').value;
+    $<HTMLInputElement>('check-reduced-motion').onchange = () => this.callbacks.onToggleReducedMotion($<HTMLInputElement>('check-reduced-motion').checked);
+    document.querySelectorAll<HTMLElement>('.piano-key').forEach(key => {
+      key.onpointerdown = e => { if (this.currentMode !== 'piano') return; e.preventDefault(); key.setPointerCapture(e.pointerId); this.down(`p${e.pointerId}`, key.dataset.note!, +key.dataset.octave!); };
+      key.onpointerup = key.onpointercancel = e => { this.up(`p${e.pointerId}`); };
+      key.onlostpointercapture = e => this.up(`p${e.pointerId}`);
     });
-
-    window.addEventListener('pointerup', () => {
-      if (isPointerPressed) {
-        isPointerPressed = false;
-        stopActiveKey();
-      }
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { if (!$('modal-settings').classList.contains('hidden')) $('modal-settings').classList.add('hidden'); else this.callbacks.onTogglePause(); return; }
+      if (this.currentMode !== 'piano' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || (e.target instanceof HTMLElement && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName))) return;
+      const data = keyMap.get(e.key.toLowerCase());
+      if (data) { e.preventDefault(); this.down(e.key.toLowerCase(), data.note, data.octave); }
     });
-
-    window.addEventListener('pointercancel', () => {
-      if (isPointerPressed) {
-        isPointerPressed = false;
-        stopActiveKey();
-      }
-    });
-
-    // Computer keyboard mapping for piano
-    const KEY_MAP: Record<string, string> = {
-      'a': 'C', 'w': 'C♯', 's': 'D', 'e': 'D♯', 'd': 'E',
-      'f': 'F', 't': 'F♯', 'g': 'G', 'y': 'G♯', 'h': 'A',
-      'u': 'A♯', 'j': 'B', 'k': 'C'
-    };
-
-    window.addEventListener('keydown', (e) => {
-      // Disallow cheat shortcuts in Microphone mode
-      if (this.currentMode !== 'piano') return;
-      if (e.repeat) return; // Ignore OS repeat
-
-      const char = e.key.toLowerCase();
-      if (KEY_MAP[char]) {
-        const now = performance.now();
-        // Prevent multi-key simultaneous mashing cheat
-        if (now - this.multiKeyMashTimer < 40 && this.heldKeyboardKeys.size >= 1) {
-          // Simultaneous mashing detected; reject as invalid chord attempt
-          return;
-        }
-        this.multiKeyMashTimer = now;
-        this.heldKeyboardKeys.add(char);
-
-        const note = KEY_MAP[char];
-        const keyEl = document.querySelector(`.piano-key[data-key="${char}"]`);
-        if (keyEl) keyEl.classList.add('active');
-
-        this.callbacks.onPianoNoteDown(note);
-        this.callbacks.onPianoAttack(note);
-      }
-    });
-
-    window.addEventListener('keyup', (e) => {
-      const char = e.key.toLowerCase();
-      if (KEY_MAP[char]) {
-        this.heldKeyboardKeys.delete(char);
-        const note = KEY_MAP[char];
-        const keyEl = document.querySelector(`.piano-key[data-key="${char}"]`);
-        if (keyEl) keyEl.classList.remove('active');
-        this.callbacks.onPianoNoteUp(note);
-      }
-    });
-
-    // Settings Controls
-    const tolSelect = document.getElementById('select-tolerance') as HTMLSelectElement;
-    tolSelect?.addEventListener('change', () => {
-      this.callbacks.onUpdateTolerance(parseInt(tolSelect.value, 10));
-    });
-
-    const sensSlider = document.getElementById('range-sensitivity') as HTMLInputElement;
-    const sensLabel = document.getElementById('label-sensitivity')!;
-    sensSlider?.addEventListener('input', () => {
-      const val = parseFloat(sensSlider.value);
-      sensLabel.textContent = `${val.toFixed(1)}x`;
-      this.callbacks.onUpdateSensitivity(val);
-    });
-
-    const sfxSlider = document.getElementById('range-sfx-vol') as HTMLInputElement;
-    const sfxLabel = document.getElementById('label-sfx-vol')!;
-    sfxSlider?.addEventListener('input', () => {
-      soundSynth.sfxVolume = parseFloat(sfxSlider.value);
-      sfxLabel.textContent = `${Math.round(soundSynth.sfxVolume * 100)}%`;
-    });
-
-    const pianoSlider = document.getElementById('range-piano-vol') as HTMLInputElement;
-    const pianoLabel = document.getElementById('label-piano-vol')!;
-    pianoSlider?.addEventListener('input', () => {
-      soundSynth.pianoVolume = parseFloat(pianoSlider.value);
-      pianoLabel.textContent = `${Math.round(soundSynth.pianoVolume * 100)}%`;
-    });
-
-    const motionCheck = document.getElementById('check-reduced-motion') as HTMLInputElement;
-    motionCheck?.addEventListener('change', () => {
-      this.callbacks.onToggleReducedMotion(motionCheck.checked);
-    });
-
-    // Calibrate button
-    const calibBtn = document.getElementById('btn-calibrate') as HTMLButtonElement;
-    const calibTrack = document.getElementById('calibration-bar-track')!;
-    const calibFill = document.getElementById('calibration-bar-fill')!;
-    calibBtn?.addEventListener('click', async () => {
-      calibBtn.disabled = true;
-      calibBtn.textContent = 'Listening to room...';
-      calibTrack.classList.remove('hidden');
-
-      await this.callbacks.onCalibrateNoise((progress) => {
-        calibFill.style.width = `${Math.round(progress * 100)}%`;
-      });
-
-      calibBtn.textContent = '✓ Calibrated!';
-      setTimeout(() => {
-        calibBtn.disabled = false;
-        calibBtn.textContent = '🎙️ Calibrate (1s)';
-        calibTrack.classList.add('hidden');
-        calibFill.style.width = '0%';
-      }, 1500);
-    });
+    window.addEventListener('keyup', e => this.up(e.key.toLowerCase()));
+    window.addEventListener('blur', () => this.releaseKeys());
   }
-
-  public updateHealth(current: number, max: number): void {
-    const pct = Math.max(0, Math.min(100, (current / max) * 100));
-    this.healthBarFill.style.width = `${pct}%`;
-    this.healthValueEl.textContent = `${Math.round(current)}`;
-
-    if (pct < 30) {
-      this.healthBarFill.style.backgroundColor = '#FF8493'; // Danger coral
-    } else if (pct < 60) {
-      this.healthBarFill.style.backgroundColor = '#FFD36E'; // Warning gold
-    } else {
-      this.healthBarFill.style.backgroundColor = '#36D6C5'; // Healthy teal
-    }
+  private setMode(mode: GameInputMode) {
+    this.releaseKeys(); this.currentMode = mode;
+    $('tab-mic').classList.toggle('active', mode === 'mic'); $('tab-piano').classList.toggle('active', mode === 'piano');
+    $('mic-hud-section').classList.toggle('hidden', mode !== 'mic'); $('piano-hud-section').classList.toggle('hidden', mode !== 'piano');
+    document.body.dataset.mode = mode; this.callbacks.onChangeInputMode(mode);
   }
-
-  public updateScore(score: number, combo: number): void {
-    this.scoreEl.textContent = score.toLocaleString();
-    this.comboEl.textContent = `x${combo.toFixed(1)}`;
-    if (combo > 1.5) {
-      this.comboEl.classList.add('gold-accent');
-    } else {
-      this.comboEl.classList.remove('gold-accent');
-    }
+  private down(source: string, note: string, octave: number) {
+    if (this.held.has(source)) return;
+    this.held.set(source, {note, octave}); this.matcher.reset();
+    this.callbacks.onPianoNoteDown(note, octave); this.paintKeys();
   }
-
-  public updateWave(wave: number): void {
-    this.waveEl.textContent = wave.toString().padStart(2, '0');
+  private up(source: string) {
+    const data = this.held.get(source); if (!data) return;
+    this.held.delete(source); this.matcher.reset();
+    if (![...this.held.values()].some(v => v.note === data.note && v.octave === data.octave)) this.callbacks.onPianoNoteUp(data.note, data.octave);
+    this.paintKeys();
   }
-
-  public updateTimer(seconds: number): void {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    this.timerEl.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  private paintKeys() { document.querySelectorAll<HTMLElement>('.piano-key').forEach(el => el.classList.toggle('active', [...this.held.values()].some(v => v.note === el.dataset.note && v.octave === +el.dataset.octave!))); }
+  public releaseKeys() { this.held.clear(); this.matcher.reset(); soundSynth.releaseAllPianoNotes(); this.paintKeys(); }
+  public setPlaying(playing: boolean) { this.active = playing; if (!playing) this.releaseKeys(); }
+  public updatePiano(dt: number) {
+    if (this.currentMode !== 'piano' || !this.active) return;
+    const valid = this.held.size === 1 ? [...this.held.values()][0] : null;
+    const result = this.matcher.update(valid?.note || null, valid?.octave || 4, 0, valid ? 1 : 0, dt);
+    $('piano-status').textContent = this.held.size > 1 ? 'One note at a time — release the extra keys.' : valid ? `${valid.note} · hold ${Math.round(result.holdProgress * 100)}%` : `Target ${this.currentTarget || '—'} · hold one key steadily`;
   }
-
-  public setTargetNote(note: string | null): void {
-    this.targetBadgeEl.textContent = note || '--';
+  public updateInputStatus(status: InputStatus) {
+    if (performance.now() - this.lastDiagnostics < 100) return; this.lastDiagnostics = performance.now();
+    $('input-message').textContent = status.message; $('settings-input-status').textContent = status.message;
+    $('device-label').textContent = status.device; $('btn-mic-toggle').textContent = status.connected ? 'Mic input' : 'Connect mic';
+    $('mic-meter-fill').style.width = `${Math.min(100, Math.sqrt(status.level) * 280)}%`;
+    const s = status.settings;
+    const setting = (v: boolean | undefined) => v === undefined ? 'unavailable' : v ? 'on' : 'off';
+    $('input-diagnostics').textContent = `Raw level: ${status.level.toFixed(4)}\nGate: ${status.threshold.toFixed(4)}\nConfidence: ${(status.confidence * 100).toFixed(0)}%\nFrequency: ${status.frequency.toFixed(1)} Hz\nSample rate: ${s?.sampleRate || 'unavailable'}\nAutomatic gain: ${setting(s?.autoGainControl)}\nNoise suppression: ${setting(s?.noiseSuppression)}\nEcho cancellation: ${setting(s?.echoCancellation)}`;
   }
-
-  public updatePitchDisplay(result: PitchDetectionResult | null): void {
-    if (!result) {
-      this.detectedBadgeEl.textContent = '--';
-      this.detectedBadgeEl.className = 'note-pill detected-pill';
-      this.tuningNeedleEl.style.left = '50%';
-      this.tuningStatusEl.textContent = 'LISTENING...';
-      this.tuningStatusEl.style.color = '#17213A';
-      this.holdProgressRing.style.width = '0%';
-      this.micVolumeBar.style.width = '0%';
-      return;
-    }
-
-    // Mic volume
-    const volPercent = Math.min(100, Math.round(result.volume * 500));
-    this.micVolumeBar.style.width = `${volPercent}%`;
-
-    // Note name + Octave
-    const octaveSub = result.octave !== undefined ? `<span class="octave-sub">${result.octave}</span>` : '';
-    this.detectedBadgeEl.innerHTML = `${result.noteName}${octaveSub}`;
-
-    // Needle mapping (-50 to +50 cents -> 0% to 100%)
-    const clampedCents = Math.max(-50, Math.min(50, result.cents));
-    const needlePercent = 50 + (clampedCents / 50) * 45;
-    this.tuningNeedleEl.style.left = `${needlePercent}%`;
-
-    // Hold progress bar
-    const holdPct = Math.round(result.matchStatus.holdProgress * 100);
-    this.holdProgressRing.style.width = `${holdPct}%`;
-
-    const inTune = result.matchStatus.inTune;
-    const sign = result.cents > 0 ? '+' : '';
-    const centsText = `${sign}${Math.round(result.cents)}c`;
-
-    if (inTune) {
-      this.detectedBadgeEl.className = 'note-pill detected-pill in-tune';
-      this.tuningNeedleEl.style.backgroundColor = '#36D6C5';
-      if (result.matchStatus.holdProgress > 0) {
-        this.tuningStatusEl.textContent = `★ HOLD STEADY ${holdPct}% (${centsText}) ★`;
-        this.tuningStatusEl.style.color = '#36D6C5';
-      } else {
-        this.tuningStatusEl.textContent = `★ IN TUNE (${centsText}) ★`;
-        this.tuningStatusEl.style.color = '#36D6C5';
-      }
-    } else if (result.cents < -35) {
-      this.detectedBadgeEl.className = 'note-pill detected-pill flat';
-      this.tuningNeedleEl.style.backgroundColor = '#FFD36E';
-      this.tuningStatusEl.textContent = `▲ SING HIGHER (${centsText})`;
-      this.tuningStatusEl.style.color = '#FFD36E';
-    } else {
-      this.detectedBadgeEl.className = 'note-pill detected-pill sharp';
-      this.tuningNeedleEl.style.backgroundColor = '#FF8493';
-      this.tuningStatusEl.textContent = `▼ SING LOWER (${centsText})`;
-      this.tuningStatusEl.style.color = '#FF8493';
-    }
+  public updateHealth(hp: number, max: number) { $('health-bar-fill').style.width = `${hp/max*100}%`; $('health-value').textContent = `${Math.ceil(hp)}`; }
+  public updateScore(score: number, combo: number) { $('hud-score').textContent = score.toLocaleString(); $('hud-combo').textContent = `×${combo.toFixed(1)}`; }
+  public updateWave(wave: number) { $('hud-wave').textContent = String(wave).padStart(2,'0'); }
+  public updateTimer(seconds: number) { $('hud-timer').textContent = `${Math.floor(seconds/60).toString().padStart(2,'0')}:${Math.floor(seconds%60).toString().padStart(2,'0')}`; }
+  public setTargetNote(note: string | null) { this.currentTarget = note; $('target-note-badge').textContent = note || '—'; }
+  public updatePitchDisplay(result: PitchDetectionResult | null) {
+    $('detected-note-badge').textContent = result ? `${result.noteName}${result.octave}` : '—';
+    $('tuning-needle').style.left = `${50 + (result ? Math.max(-50,Math.min(50,result.cents)) : 0)}%`;
+    $('hold-progress-fill').style.width = `${(result?.matchStatus.holdProgress || 0)*100}%`;
+    $('tune-status').textContent = result ? `${Math.round(result.cents)>0 ? '+' : ''}${Math.round(result.cents)} cents · ${result.matchStatus.inTune ? 'HOLD STEADY' : 'ADJUST PITCH'}` : 'LISTENING';
   }
-
-  public showPause(show: boolean): void {
-    this.pauseModal.classList.toggle('hidden', !show);
-  }
-
-  public showWaveBanner(waveNumber: number, title: string): void {
-    if (!this.waveBannerEl) return;
-    this.waveBannerTitleEl.textContent = `WAVE ${waveNumber.toString().padStart(2, '0')}`;
-    this.waveBannerSubEl.textContent = title.toUpperCase();
-    this.waveBannerEl.classList.remove('hidden', 'fade-out');
-    // Force DOM reflow to re-trigger CSS keyframe animation
-    void this.waveBannerEl.offsetWidth;
-    this.waveBannerEl.classList.add('banner-anim');
-
-    setTimeout(() => {
-      this.waveBannerEl.classList.add('fade-out');
-      setTimeout(() => {
-        this.waveBannerEl.classList.add('hidden');
-        this.waveBannerEl.classList.remove('banner-anim', 'fade-out');
-      }, 500);
-    }, 1800);
-  }
-
-  public showGameOver(score: number, wave: number, bestScore = score, accuracy = 100): void {
-    this.finalScoreEl.textContent = score.toLocaleString();
-    this.bestScoreEl.textContent = bestScore.toLocaleString();
-    this.finalWaveEl.textContent = wave.toString().padStart(2, '0');
-    this.finalAccuracyEl.textContent = `${accuracy}%`;
-    this.gameOverModal.classList.remove('hidden');
-  }
+  public showPause(show: boolean) { $('modal-pause').classList.toggle('hidden', !show); }
+  public showWaveBanner(wave: number, title: string) { window.clearTimeout(this.bannerTimer); $('wave-banner-title').textContent = `Wave ${wave}`; $('wave-banner-sub').textContent = title; $('wave-banner').classList.remove('hidden'); this.bannerTimer = window.setTimeout(() => $('wave-banner').classList.add('hidden'), 1700); }
+  public showGameOver(score: number, wave: number, best: number, hits: number) { this.setPlaying(false); $('final-score').textContent = score.toLocaleString(); $('best-score').textContent = best.toLocaleString(); $('final-wave').textContent = `${wave}`; $('final-hits').textContent = `${hits}`; $('modal-gameover').classList.remove('hidden'); }
 }

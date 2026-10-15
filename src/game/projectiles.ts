@@ -78,7 +78,7 @@ export class Projectile {
     if (this.progress >= 1.0) {
       this.isFinished = true;
       this.targetEnemy.isTargetedByProjectile = false;
-      scene.remove(this.mesh);
+      this.destroy(scene);
       onHit(this.targetEnemy);
     }
   }
@@ -86,5 +86,12 @@ export class Projectile {
   public destroy(scene: THREE.Scene): void {
     this.targetEnemy.isTargetedByProjectile = false;
     scene.remove(this.mesh);
+    this.mesh.traverse(object => {
+      if (object instanceof THREE.Mesh) {
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach(material => material.dispose());
+      }
+    });
   }
 }
