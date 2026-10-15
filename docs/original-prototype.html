@@ -1,0 +1,3230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Pitch Patrol — 3D Top-Down Musical Survival</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    :root {
+      --bg-deep: #18233F;
+      --stage-surface: #EAF4FF;
+      --primary-teal: #36D6C5;
+      --secondary-lavender: #A68CFF;
+      --playful-coral: #FF8493;
+      --reward-gold: #FFD36E;
+      --text-dark: #17213A;
+      --text-light: #F7FAFF;
+      --panel-bg: rgba(24, 35, 63, 0.90);
+      --panel-border: rgba(234, 244, 255, 0.20);
+      --shadow-soft: 0 8px 24px rgba(12, 19, 38, 0.34);
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+      --font-main: 'Nunito', 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-deep);
+      font-family: var(--font-main);
+      color: var(--text-light);
+      touch-action: none;
+    }
+
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 40%, #273A69 0%, #18233F 76%);
+    }
+
+    canvas#three-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 1;
+    }
+
+    /* Screen-Facing Enemy Badges (Larger, Sharp Contrast, Non-Overlapping) */
+    #labels-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      overflow: hidden;
+    }
+
+    .enemy-badge {
+      position: absolute;
+      transform: translate(-50%, -100%);
+      background: var(--stage-surface);
+      color: var(--text-dark);
+      font-weight: 900;
+      font-size: 1.18rem;
+      line-height: 1.1;
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 3.5px solid var(--text-dark);
+      box-shadow: 0 5px 14px rgba(17, 25, 44, 0.34);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+      pointer-events: none;
+      transition: transform 0.08s ease-out, background-color 0.12s ease, border-color 0.12s ease;
+    }
+
+    .enemy-badge .note-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(23, 33, 58, 0.45);
+      flex-shrink: 0;
+    }
+
+    .enemy-badge.urgent {
+      border-color: var(--playful-coral);
+      box-shadow: 0 0 0 4px rgba(255, 132, 147, 0.42), 0 6px 14px rgba(17, 25, 44, 0.38);
+    }
+
+    .enemy-badge.attacking {
+      background: #FFE3E7;
+      border-color: #E03E52;
+      animation: badgePulse 0.38s infinite alternate;
+    }
+
+    .enemy-badge.matching {
+      background: var(--reward-gold);
+      border-color: var(--text-dark);
+      transform: translate(-50%, -108%) scale(1.14);
+    }
+
+    @keyframes badgePulse {
+      from { transform: translate(-50%, -100%) scale(1.0); }
+      to { transform: translate(-50%, -105%) scale(1.08); }
+    }
+
+    .score-popup {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      font-weight: 900;
+      font-size: 1.2rem;
+      color: var(--reward-gold);
+      text-shadow: 0 2px 8px rgba(17, 25, 44, 0.9);
+      pointer-events: none;
+      animation: floatUp 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    .damage-popup {
+      color: var(--playful-coral);
+      font-size: 1.25rem;
+    }
+
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translate(-50%, -15%) scale(0.85); }
+      40% { opacity: 1; transform: translate(-50%, -85%) scale(1.1); }
+      100% { opacity: 0; transform: translate(-50%, -145%) scale(0.96); }
+    }
+
+    /* HUD Layout:
+       Top-Left: Health
+       Top-Center: Wave & Survival Time
+       Top-Right: Score & Pause/Controls
+       Bottom-Center: Pitch Feedback + Match Progress (+ Piano in Piano modes)
+    */
+    #hud {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: max(10px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+    }
+
+    .hud-top {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: start;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .hud-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-self: start;
+    }
+
+    .hud-center {
+      justify-self: center;
+    }
+
+    .hud-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-self: end;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .hud-card {
+      pointer-events: auto;
+      background: var(--panel-bg);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 2px solid var(--panel-border);
+      border-radius: var(--radius-lg);
+      padding: 9px 15px;
+      box-shadow: var(--shadow-soft);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: transform 0.18s ease, border-color 0.2s ease;
+    }
+
+    .hud-card.damage-flash {
+      border-color: var(--playful-coral);
+      box-shadow: 0 0 20px rgba(255, 132, 147, 0.65);
+    }
+
+    .hud-card.combo-glow {
+      border-color: var(--reward-gold);
+      box-shadow: 0 0 18px rgba(255, 211, 110, 0.55);
+    }
+
+    /* Health Bar */
+    .hp-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 150px;
+    }
+
+    .hp-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.75rem;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      color: var(--text-light);
+    }
+
+    .hp-track {
+      width: 100%;
+      height: 11px;
+      background: rgba(234, 244, 255, 0.15);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1.5px solid rgba(234, 244, 255, 0.25);
+    }
+
+    .hp-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #36D6C5 0%, #5CE08A 100%);
+      border-radius: 999px;
+      transition: width 0.2s ease, background 0.2s ease;
+    }
+
+    .hp-fill.low {
+      background: linear-gradient(90deg, #FF5C72 0%, #FF8493 100%);
+    }
+
+    .hp-fill.mid {
+      background: linear-gradient(90deg, #FFB347 0%, #FFD36E 100%);
+    }
+
+    .stat-group {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-label {
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--primary-teal);
+    }
+
+    .stat-value {
+      font-size: 1.28rem;
+      font-weight: 900;
+      color: var(--text-light);
+      line-height: 1.15;
+    }
+
+    .mode-pill {
+      font-size: 0.7rem;
+      font-weight: 900;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: rgba(166, 140, 255, 0.22);
+      border: 1.5px solid var(--secondary-lavender);
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .icon-btn {
+      pointer-events: auto;
+      background: var(--panel-bg);
+      color: var(--text-light);
+      border: 2px solid var(--panel-border);
+      border-radius: var(--radius-md);
+      padding: 8px 12px;
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      box-shadow: var(--shadow-soft);
+      transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+    }
+
+    .icon-btn:hover {
+      border-color: var(--primary-teal);
+      background: rgba(34, 50, 88, 0.95);
+    }
+
+    .icon-btn:active {
+      transform: scale(0.96);
+    }
+
+    .icon-btn svg {
+      width: 17px;
+      height: 17px;
+      stroke: currentColor;
+      stroke-width: 2.2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex-shrink: 0;
+    }
+
+    /* Bottom Pitch & Piano Panel */
+    .hud-bottom {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+    }
+
+    .tuning-panel {
+      pointer-events: auto;
+      background: var(--panel-bg);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 2px solid var(--panel-border);
+      border-radius: var(--radius-lg);
+      padding: 10px 16px;
+      width: min(600px, 96vw);
+      box-shadow: var(--shadow-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .tuning-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .target-readout {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      font-weight: 800;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 38px;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-weight: 900;
+      font-size: 0.95rem;
+      background: var(--stage-surface);
+      color: var(--text-dark);
+    }
+
+    .badge-pill.you-pill {
+      background: var(--primary-teal);
+      color: var(--text-dark);
+    }
+
+    .state-feedback {
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: var(--reward-gold);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .input-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #55698F;
+      transition: background 0.1s ease, box-shadow 0.1s ease;
+    }
+
+    .input-dot.active {
+      background: var(--primary-teal);
+      box-shadow: 0 0 9px var(--primary-teal);
+    }
+
+    /* Tuning Meter + Stable Hold Progress Bar */
+    .meters-grid {
+      display: grid;
+      grid-template-columns: 1fr 135px;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .meter-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #B9CBE8;
+    }
+
+    .meter-track {
+      position: relative;
+      flex: 1;
+      height: 11px;
+      background: rgba(234, 244, 255, 0.12);
+      border-radius: 999px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .meter-center-zone {
+      width: 30%;
+      height: 100%;
+      background: rgba(54, 214, 197, 0.26);
+      border-left: 2px dashed rgba(54, 214, 197, 0.75);
+      border-right: 2px dashed rgba(54, 214, 197, 0.75);
+    }
+
+    .meter-needle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--text-light);
+      border: 2.5px solid var(--text-dark);
+      transform: translate(-50%, -50%);
+      transition: left 0.07s ease-out, background-color 0.1s ease;
+    }
+
+    .meter-needle.in-tune {
+      background: var(--primary-teal);
+      box-shadow: 0 0 10px var(--primary-teal);
+    }
+
+    .meter-needle.near-tune {
+      background: var(--reward-gold);
+    }
+
+    .hold-progress-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .hold-label {
+      font-size: 0.65rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #B9CBE8;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .hold-track {
+      width: 100%;
+      height: 9px;
+      background: rgba(234, 244, 255, 0.14);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .hold-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--reward-gold), var(--primary-teal));
+      border-radius: 999px;
+      transition: width 0.04s linear;
+    }
+
+    /* Authentic Piano Keyboard (White & Black Keys) */
+    .piano-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-top: 2px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(234, 244, 255, 0.14);
+    }
+
+    .piano-Wrapper-hidden {
+      display: none !important;
+    }
+
+    .piano-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.72rem;
+      color: #B9CBE8;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .piano-toggles {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .mini-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .piano-keyboard {
+      position: relative;
+      width: 100%;
+      height: 82px;
+      display: flex;
+      background: #10182C;
+      padding: 4px;
+      border-radius: 12px;
+      box-shadow: inset 0 2px 6px rgba(0,0,0,0.6);
+      touch-action: none;
+    }
+
+    .white-key {
+      position: relative;
+      flex: 1;
+      height: 100%;
+      background: linear-gradient(180deg, #FFFFFF 0%, #EAF4FF 100%);
+      border: 1.5px solid #18233F;
+      border-radius: 0 0 8px 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding-bottom: 6px;
+      color: var(--text-dark);
+      font-weight: 900;
+      font-size: 0.78rem;
+      box-shadow: 0 3px 0 #9BB5D6;
+      z-index: 1;
+      transition: transform 0.04s ease, background 0.08s ease;
+    }
+
+    .white-key.pressed {
+      background: var(--primary-teal);
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 #1B8B7E;
+    }
+
+    .black-key {
+      position: absolute;
+      top: 4px;
+      width: 8.2%;
+      height: 58%;
+      background: linear-gradient(180deg, #2B3B63 0%, #17213A 100%);
+      border: 1.5px solid #0D1426;
+      border-radius: 0 0 6px 6px;
+      cursor: pointer;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding-bottom: 5px;
+      color: var(--text-light);
+      font-weight: 800;
+      font-size: 0.66rem;
+      box-shadow: 0 3px 0 #0B1020;
+      transform: translateX(-50%);
+      transition: transform 0.04s ease, background 0.08s ease;
+    }
+
+    .black-key.pressed {
+      background: var(--secondary-lavender);
+      color: var(--text-dark);
+      transform: translateX(-50%) translateY(2px);
+    }
+
+    .key-note-label, .key-bind-label {
+      pointer-events: none;
+      line-height: 1.05;
+    }
+
+    .key-bind-label {
+      font-size: 0.6rem;
+      opacity: 0.65;
+      font-weight: 700;
+    }
+
+    .hide-note-labels .key-note-label {
+      display: none;
+    }
+
+    .hide-bind-labels .key-bind-label {
+      display: none;
+    }
+
+    /* Chord Quick-Trigger Bar (for Chord Survival / Practice convenience alongside raw piano keys) */
+    .chord-bar {
+      display: flex;
+      gap: 5px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .chord-chip {
+      background: rgba(166, 140, 255, 0.18);
+      border: 1.5px solid var(--secondary-lavender);
+      color: var(--text-light);
+      border-radius: 8px;
+      padding: 4px 10px;
+      font-family: inherit;
+      font-size: 0.76rem;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .chord-chip.pressed {
+      background: var(--primary-teal);
+      color: var(--text-dark);
+      border-color: var(--text-light);
+    }
+
+    /* Modals & Setup Flows */
+    .overlay-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      background: rgba(18, 27, 50, 0.80);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+    }
+
+    .overlay-backdrop.hidden {
+      display: none;
+    }
+
+    .modal-panel {
+      background: var(--stage-surface);
+      color: var(--text-dark);
+      border-radius: 24px;
+      padding: 22px;
+      width: min(640px, 96vw);
+      max-height: 92vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 50px rgba(8, 13, 28, 0.6);
+      border: 4px solid #FFFFFF;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .logo-header {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .logo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--bg-deep);
+      color: var(--reward-gold);
+      padding: 4px 13px;
+      border-radius: 999px;
+      font-size: 0.73rem;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .game-logo {
+      font-size: clamp(1.6rem, 4.5vw, 2.2rem);
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      color: var(--text-dark);
+      margin: 2px 0 0;
+      line-height: 1.05;
+    }
+
+    .game-logo span {
+      color: #169B8C;
+    }
+
+    .logo-subtitle {
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: #425275;
+      margin: 0;
+      max-width: 480px;
+    }
+
+    .mode-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .mode-card {
+      background: #FFFFFF;
+      border: 2.5px solid #D4E4F7;
+      border-radius: var(--radius-md);
+      padding: 10px 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 5px;
+      transition: all 0.14s ease;
+    }
+
+    .mode-card svg {
+      width: 24px;
+      height: 24px;
+      stroke: var(--text-dark);
+      stroke-width: 2.2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .mode-card.selected {
+      border-color: var(--primary-teal);
+      background: #E9FBF9;
+      box-shadow: 0 4px 12px rgba(54, 214, 197, 0.25);
+    }
+
+    .mode-title {
+      font-weight: 900;
+      font-size: 0.84rem;
+      color: var(--text-dark);
+    }
+
+    .mode-desc {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #52638A;
+      line-height: 1.2;
+    }
+
+    /* Microphone Setup & Calibration Box */
+    .setup-box {
+      background: #FFFFFF;
+      border: 2px solid #D4E4F7;
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .setup-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    .level-bar-wrap {
+      flex: 1;
+      min-width: 120px;
+      height: 10px;
+      background: #E2ECF9;
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .level-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--primary-teal);
+      transition: width 0.05s linear;
+    }
+
+    .small-btn {
+      background: var(--bg-deep);
+      color: var(--text-light);
+      border: none;
+      border-radius: 8px;
+      padding: 6px 11px;
+      font-family: inherit;
+      font-size: 0.76rem;
+      font-weight: 800;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .small-btn:hover {
+      background: #283A66;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px 14px;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .setting-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .setting-item select, .setting-item input[type="range"] {
+      font-family: inherit;
+      font-size: 0.76rem;
+      font-weight: 700;
+      padding: 3px 6px;
+      border-radius: 6px;
+      border: 1.5px solid #B9CBE8;
+    }
+
+    .primary-cta {
+      background: var(--primary-teal);
+      color: var(--text-dark);
+      border: 3px solid var(--text-dark);
+      border-radius: var(--radius-md);
+      padding: 12px 18px;
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 900;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      box-shadow: 0 4px 0 var(--text-dark);
+      transition: transform 0.08s ease, background-color 0.14s ease;
+    }
+
+    .primary-cta:hover {
+      background: #4AE2D2;
+    }
+
+    .primary-cta:active {
+      transform: translateY(2px);
+      box-shadow: 0 2px 0 var(--text-dark);
+    }
+
+    .primary-cta svg {
+      width: 19px;
+      height: 19px;
+      stroke: currentColor;
+      stroke-width: 2.5;
+      fill: none;
+    }
+
+    @media (max-width: 680px) {
+      .mode-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .settings-grid {
+        grid-template-columns: 1fr;
+      }
+      .hud-top {
+        grid-template-columns: 1fr auto;
+      }
+      .hud-center {
+        grid-column: 1 / -1;
+        order: 3;
+      }
+      .icon-btn span.btn-label {
+        display: none;
+      }
+      .meters-grid {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+      .piano-keyboard {
+        height: 68px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="three-canvas"></canvas>
+    <div id="labels-layer"></div>
+
+    <!-- Cohesive Gameplay HUD -->
+    <div id="hud">
+      <div class="hud-top">
+        <!-- Top Left: Health Bar & Numeric HP -->
+        <div class="hud-left">
+          <div class="hud-card" id="hp-card">
+            <div class="hp-container">
+              <div class="hp-header">
+                <span>GUARDIAN HP</span>
+                <span id="hud-hp-text">100 / 100</span>
+              </div>
+              <div class="hp-track">
+                <div class="hp-fill" id="hud-hp-fill"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top Center: Wave & Survival Time -->
+        <div class="hud-center">
+          <div class="hud-card">
+            <div class="stat-group" style="align-items: center;">
+              <span class="stat-label">WAVE <span id="hud-wave">01</span></span>
+              <span class="stat-value" id="hud-time">00:00</span>
+            </div>
+            <span class="mode-pill" id="hud-mode-pill">Vocal Mic</span>
+          </div>
+        </div>
+
+        <!-- Top Right: Score, Combo & Pause/Settings -->
+        <div class="hud-right">
+          <div class="hud-card" id="score-card">
+            <div class="stat-group">
+              <span class="stat-label">Score</span>
+              <span class="stat-value" id="hud-score">0</span>
+            </div>
+            <div class="stat-group">
+              <span class="stat-label">Combo</span>
+              <span class="stat-value" id="hud-combo">1x</span>
+            </div>
+          </div>
+
+          <button class="icon-btn" id="btn-mute" title="Toggle Sound">
+            <svg id="icon-speaker" viewBox="0 0 24 24">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+            </svg>
+          </button>
+          <button class="icon-btn" id="btn-settings" title="Audio & Tuning Settings">
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </button>
+          <button class="icon-btn" id="btn-pause" title="Pause Game">
+            <svg viewBox="0 0 24 24">
+              <rect x="6" y="4" width="4" height="16"></rect>
+              <rect x="14" y="4" width="4" height="16"></rect>
+            </svg>
+            <span class="btn-label">Pause</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Bottom Center: Pitch Feedback, State Machine Progress & Authentic Piano Keyboard -->
+      <div class="hud-bottom">
+        <div class="tuning-panel">
+          <div class="tuning-top-row">
+            <div class="target-readout">
+              <span>URGENT <span class="badge-pill" id="hud-target">—</span></span>
+              <span>·</span>
+              <span>YOU <span class="badge-pill you-pill" id="hud-detected">Listening</span></span>
+            </div>
+            <div class="state-feedback">
+              <span class="input-dot" id="mic-dot"></span>
+              <span id="hud-state-msg">Listening for note...</span>
+            </div>
+          </div>
+
+          <div class="meters-grid">
+            <div class="meter-row">
+              <span>FLAT</span>
+              <div class="meter-track">
+                <div class="meter-center-zone"></div>
+                <div class="meter-needle" id="meter-needle"></div>
+              </div>
+              <span>SHARP</span>
+            </div>
+
+            <div class="hold-progress-wrap">
+              <div class="hold-label">
+                <span>STABLE LOCK</span>
+                <span id="hud-hold-pct">0%</span>
+              </div>
+              <div class="hold-track">
+                <div class="hold-fill" id="hud-hold-fill"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Interactive White & Black Key Piano (Shown in Piano Survival, Chord Survival & Practice; hidden in Vocal Mic Survival for strict input isolation) -->
+          <div class="piano-wrapper" id="piano-wrapper">
+            <div class="piano-toolbar">
+              <span id="piano-instruction">Hold a single key steadily to lock & fire (multi-key mashing is rejected)</span>
+              <div class="piano-toggles">
+                <label class="mini-toggle">
+                  <input type="checkbox" id="chk-show-note-names" />
+                  Show note names
+                </label>
+                <label class="mini-toggle">
+                  <input type="checkbox" id="chk-show-key-map" />
+                  Key map
+                </label>
+                <button class="small-btn" id="btn-ref-tone" style="padding: 3px 8px; font-size: 0.7rem;" title="Play Reference Target Note (Suspends mic scoring briefly)">
+                  Ref Tone
+                </button>
+              </div>
+            </div>
+
+            <div class="piano-keyboard hide-note-labels hide-bind-labels" id="piano-keyboard"></div>
+            <div class="chord-bar hidden" id="chord-bar"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Start / Mode & Microphone Calibration Modal -->
+    <div class="overlay-backdrop" id="start-modal">
+      <div class="modal-panel">
+        <div class="logo-header">
+          <div class="logo-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none">
+              <path d="M9 18V5l12-2v13"></path>
+              <circle cx="6" cy="18" r="3"></circle>
+              <circle cx="18" cy="16" r="3"></circle>
+            </svg>
+            Melody Garden · Intentional Pitch Edition
+          </div>
+          <h1 class="game-logo">PITCH <span>PATROL</span></h1>
+          <p class="logo-subtitle">Hold a steady, in-tune pitch to charge your guardian's resonance staff and fire! Choose an isolated input mode below.</p>
+        </div>
+
+        <!-- 4 Isolated Modes -->
+        <div class="mode-grid" id="mode-cards">
+          <div class="mode-card selected" data-mode="vocal">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+            </svg>
+            <div class="mode-title">Vocal Survival</div>
+            <div class="mode-desc">Microphone only. Keyboard/piano shortcuts disabled.</div>
+          </div>
+
+          <div class="mode-card" data-mode="piano">
+            <svg viewBox="0 0 24 24">
+              <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+              <line x1="6" y1="4" x2="6" y2="14"></line>
+              <line x1="10" y1="4" x2="10" y2="14"></line>
+              <line x1="14" y1="4" x2="14" y2="14"></line>
+              <line x1="18" y1="4" x2="18" y2="14"></line>
+            </svg>
+            <div class="mode-title">Piano Survival</div>
+            <div class="mode-desc">Play & hold notes on the unlabeled/labeled piano keyboard.</div>
+          </div>
+
+          <div class="mode-card" data-mode="chord">
+            <svg viewBox="0 0 24 24">
+              <path d="M9 18V5l12-2v13"></path>
+              <circle cx="6" cy="18" r="3"></circle>
+              <circle cx="18" cy="16" r="3"></circle>
+            </svg>
+            <div class="mode-title">Chord Survival</div>
+            <div class="mode-desc">Chord Clouds (Am, C, G7, Dm, F) + single notes.</div>
+          </div>
+
+          <div class="mode-card" data-mode="practice">
+            <svg viewBox="0 0 24 24">
+              <path d="M3 18v-6a9 9 0 0 1 18 0v6"></path>
+              <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path>
+            </svg>
+            <div class="mode-title">Practice & Setup</div>
+            <div class="mode-desc">No HP drain. Test your voice or practice the piano freely.</div>
+          </div>
+        </div>
+
+        <!-- Microphone Setup, Noise Calibration & Test Flow -->
+        <div class="setup-box">
+          <div class="setup-row">
+            <span><strong>Microphone Setup & Calibration</strong> (Headphones recommended to reduce speaker bleed)</span>
+            <div style="display: flex; gap: 6px;">
+              <button class="small-btn" id="btn-mic-test">1. Connect Mic</button>
+              <button class="small-btn" id="btn-calibrate-noise">2. Measure Room Noise</button>
+              <button class="small-btn" id="btn-test-a4">Play A4 (440Hz)</button>
+            </div>
+          </div>
+
+          <div class="setup-row">
+            <span id="setup-mic-readout" style="min-width: 175px;">Mic Status: Not connected</span>
+            <div class="level-bar-wrap">
+              <div class="level-bar-fill" id="setup-level-fill"></div>
+            </div>
+            <span id="setup-noise-readout" style="font-size: 0.74rem; color: #52638A;">Noise floor: 0.012</span>
+          </div>
+
+          <div class="settings-grid">
+            <div class="setting-item">
+              <label for="sel-tolerance">Pitch Tolerance:</label>
+              <select id="sel-tolerance">
+                <option value="32" selected>Standard (±32 cents)</option>
+                <option value="45">Beginner (±45 cents)</option>
+                <option value="24">Strict (±24 cents)</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="sel-hold-ms">Stable Hold Window:</label>
+              <select id="sel-hold-ms">
+                <option value="250">Fast (250 ms)</option>
+                <option value="285" selected>Standard (285 ms)</option>
+                <option value="340">Deliberate (340 ms)</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="rng-sensitivity">Mic Sensitivity:</label>
+              <input type="range" id="rng-sensitivity" min="1" max="100" value="65" />
+            </div>
+
+            <div class="setting-item">
+              <label for="sel-tuning-a4">Reference Tuning:</label>
+              <select id="sel-tuning-a4">
+                <option value="440" selected>A4 = 440 Hz</option>
+                <option value="442">A4 = 442 Hz</option>
+                <option value="432">A4 = 432 Hz</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="sel-octave-mode">Octave Matching:</label>
+              <select id="sel-octave-mode">
+                <option value="equiv" selected>Octave-Equivalent (C = any C)</option>
+                <option value="exact">Exact Octave (C4 = 261.6 Hz)</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+                <input type="checkbox" id="chk-reduced-motion" />
+                Reduced Motion & Effects
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button class="primary-cta" id="btn-start-game">
+          <svg viewBox="0 0 24 24">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          Launch Melody Garden Patrol
+        </button>
+      </div>
+    </div>
+
+    <!-- Pause / Settings Modal -->
+    <div class="overlay-backdrop hidden" id="info-modal">
+      <div class="modal-panel">
+        <div class="logo-header">
+          <div class="logo-badge" id="info-modal-badge">Paused</div>
+          <h2 class="game-logo" id="info-modal-title" style="font-size: 1.55rem;">Game Paused</h2>
+          <p class="logo-subtitle" id="info-modal-desc">Adjust audio volumes, pitch rules, or resume your patrol.</p>
+        </div>
+
+        <div class="setup-box">
+          <div class="settings-grid">
+            <div class="setting-item">
+              <label for="rng-sfx-vol">Effects Volume:</label>
+              <input type="range" id="rng-sfx-vol" min="0" max="100" value="75" />
+            </div>
+            <div class="setting-item">
+              <label for="rng-piano-vol">Piano / Ref Volume:</label>
+              <input type="range" id="rng-piano-vol" min="0" max="100" value="85" />
+            </div>
+          </div>
+          <p style="margin: 4px 0 0; font-size: 0.78rem; color: #425275;">
+            <strong>Intentional Pitch Rules:</strong> Each attack requires holding an in-tune pitch through the full confirmation window. Brief sweeps, multi-key mashing, and reference-tone playback cannot trigger hits.
+          </p>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+          <button class="primary-cta" id="btn-resume-game" style="flex: 1;">Resume</button>
+          <button class="primary-cta" id="btn-open-setup" style="background: #FFFFFF; flex: 1;">Mode / Mic Setup</button>
+          <button class="primary-cta" id="btn-restart-from-modal" style="background: var(--reward-gold); flex: 1;">Restart</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Game Over / Results Modal -->
+    <div class="overlay-backdrop hidden" id="gameover-modal">
+      <div class="modal-panel">
+        <div class="logo-header">
+          <div class="logo-badge" style="background: var(--playful-coral); color: var(--text-dark);">Guardian Exhausted (0 HP)</div>
+          <h2 class="game-logo">PATROL <span>COMPLETE</span></h2>
+          <p class="logo-subtitle" id="gameover-subtitle">Your musical guardian held the stage bravely!</p>
+        </div>
+
+        <div class="mode-grid">
+          <div class="mode-card selected">
+            <div class="mode-desc">MODE SCORE</div>
+            <div class="mode-title" id="res-score" style="font-size: 1.35rem;">0</div>
+          </div>
+          <div class="mode-card selected">
+            <div class="mode-desc">BEST IN MODE</div>
+            <div class="mode-title" id="res-best-score" style="font-size: 1.35rem;">0</div>
+          </div>
+          <div class="mode-card selected">
+            <div class="mode-desc">WAVE REACHED</div>
+            <div class="mode-title" id="res-wave" style="font-size: 1.35rem;">01</div>
+          </div>
+          <div class="mode-card selected">
+            <div class="mode-desc">MAX COMBO</div>
+            <div class="mode-title" id="res-combo" style="font-size: 1.35rem;">1x</div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+          <button class="primary-cta" id="btn-play-again" style="flex: 2;">Play Again</button>
+          <button class="primary-cta" id="btn-change-mode" style="background: #FFFFFF; flex: 1;">Change Mode</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /********************************************************************
+     * 1. ENHARMONIC NORMALIZATION & MUSICAL CONSTANTS
+     ********************************************************************/
+    const PALETTE = {
+      bgDeep: 0x18233F,
+      stageSurface: 0xEAF4FF,
+      primaryTeal: 0x36D6C5,
+      secondaryLavender: 0xA68CFF,
+      playfulCoral: 0xFF8493,
+      rewardGold: 0xFFD36E,
+      textDark: 0x17213A,
+      textLight: 0xF7FAFF
+    };
+
+    // Pitch classes 0..11 (C = 0, C#/Db = 1, ..., B = 11)
+    const PITCH_CLASS_MAP = {
+      'C': 0, 'B♯': 0,
+      'C♯': 1, 'C#': 1, 'D♭': 1, 'Db': 1,
+      'D': 2,
+      'D♯': 3, 'D#': 3, 'E♭': 3, 'Eb': 3,
+      'E': 4, 'F♭': 4,
+      'F': 5, 'E♯': 5,
+      'F♯': 6, 'F#': 6, 'G♭': 6, 'Gb': 6,
+      'G': 7,
+      'G♯': 8, 'G#': 8, 'A♭': 8, 'Ab': 8,
+      'A': 9,
+      'A♯': 10, 'A#': 10, 'B♭': 10, 'Bb': 10,
+      'B': 11, 'C♭': 11
+    };
+
+    // Canonical display names with both sharps (C♯, F♯) and flats (E♭, B♭)
+    const DISPLAY_PITCH_NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+
+    const CHORD_DEFINITIONS = {
+      'Cmaj': [0, 4, 7],     // C - E - G
+      'Dm':   [2, 5, 9],     // D - F - A
+      'Em':   [4, 7, 11],    // E - G - B
+      'Fmaj': [5, 9, 0],     // F - A - C
+      'G7':   [7, 11, 2, 5], // G - B - D - F
+      'Am':   [9, 0, 4]      // A - C - E
+    };
+
+    const NOTE_COLORS = {
+      0: '#FF8493',  // C
+      1: '#FF9E7D',  // C♯ / D♭
+      2: '#FFD36E',  // D
+      3: '#F7B267',  // E♭ / D♯
+      4: '#5CE08A',  // E
+      5: '#36D6C5',  // F
+      6: '#4EB9FF',  // F♯ / G♭
+      7: '#A68CFF',  // G
+      8: '#C38FFF',  // A♭ / G♯
+      9: '#FF85E0',  // A
+      10: '#7DE2FF', // B♭ / A♯
+      11: '#9BE564'  // B
+    };
+
+    function parseNoteToken(token) {
+      if (!token) return null;
+      if (CHORD_DEFINITIONS[token]) {
+        return { isChord: true, name: token, pitchClasses: CHORD_DEFINITIONS[token], rootPc: CHORD_DEFINITIONS[token][0] };
+      }
+      const match = String(token).trim().match(/^([A-G][♯#♭b]?)(-?\d+)?$/);
+      if (!match) return null;
+      const pc = PITCH_CLASS_MAP[match[1]];
+      if (pc === undefined) return null;
+      const octave = match[2] !== undefined ? parseInt(match[2], 10) : null;
+      return { isChord: false, name: token, pitchClass: pc, octave };
+    }
+
+    function areTargetsEquivalent(candidateToken, targetToken, exactOctave = false) {
+      const cand = parseNoteToken(candidateToken);
+      const targ = parseNoteToken(targetToken);
+      if (!cand || !targ) return false;
+      if (cand.isChord || targ.isChord) {
+        return cand.isChord && targ.isChord && cand.name === targ.name;
+      }
+      if (cand.pitchClass !== targ.pitchClass) return false;
+      if (exactOctave && targ.octave !== null && cand.octave !== null) {
+        return cand.octave === targ.octave;
+      }
+      return true;
+    }
+
+    /********************************************************************
+     * 2. INTENTIONAL PITCH MATCHING STATE MACHINE
+     * States: LISTENING -> CANDIDATE -> STABLE_MATCH -> ATTACK -> REARM
+     ********************************************************************/
+    class PitchMatchStateMachine {
+      constructor(config = {}) {
+        this.toleranceCents = config.toleranceCents || 32;
+        this.holdRequiredSec = (config.holdRequiredMs || 285) / 1000;
+        this.dropoutGraceSec = (config.dropoutGraceMs || 65) / 1000;
+        this.rearmCooldownSec = (config.rearmCooldownMs || 220) / 1000;
+        this.minClarity = config.minClarity || 0.80;
+        this.maxSweepCentsPerSec = config.maxSweepCentsPerSec || 420;
+        this.exactOctave = Boolean(config.exactOctave);
+        this.reset();
+      }
+
+      reset() {
+        this.phase = 'LISTENING'; // LISTENING | CANDIDATE | STABLE_MATCH | ATTACK | REARM
+        this.candidateToken = null;
+        this.targetEnemyId = null;
+        this.holdElapsed = 0;
+        this.dropoutElapsed = 0;
+        this.rearmRemaining = 0;
+        this.lastCents = 0;
+        this.lastPitchClass = null;
+      }
+
+      /**
+       * Advance state machine by dt seconds.
+       * @param {number} dt - frame delta in seconds
+       * @param {object|null} inputFrame - { token, pitchClass, octave, cents, clarity, rms, isValid, isMultiKeyError }
+       * @param {Array} activeEnemies - list of attackable enemies
+       * @param {boolean} suppressed - true if reference tone / self-audio suppression is active
+       * @returns {{ authorizedEnemy: object|null, progress: number, statusText: string, phase: string }}
+       */
+      step(dt, inputFrame, activeEnemies, suppressed = false) {
+        if (suppressed) {
+          this.holdElapsed = 0;
+          this.phase = 'LISTENING';
+          return { authorizedEnemy: null, progress: 0, statusText: 'Ref tone playing (scoring paused)', phase: this.phase };
+        }
+
+        // Handle REARM cooldown independently of hold timer
+        if (this.phase === 'REARM') {
+          this.rearmRemaining -= dt;
+          if (this.rearmRemaining > 0) {
+            return { authorizedEnemy: null, progress: 0, statusText: 'Rearming staff...', phase: 'REARM' };
+          }
+          // Rearm complete: reset and require a fresh full hold window starting on the next frame
+          this.phase = 'LISTENING';
+          this.candidateToken = null;
+          this.targetEnemyId = null;
+          this.holdElapsed = 0;
+          this.dropoutElapsed = 0;
+          this.rearmRemaining = 0;
+          return { authorizedEnemy: null, progress: 0, statusText: 'Ready — hold pitch steady...', phase: 'LISTENING' };
+        }
+
+        if (inputFrame && inputFrame.isMultiKeyError) {
+          this.reset();
+          return { authorizedEnemy: null, progress: 0, statusText: inputFrame.errorMsg || 'Play only the target notes!', phase: 'LISTENING' };
+        }
+
+        const hasClearSignal = Boolean(
+          inputFrame &&
+          inputFrame.isValid &&
+          inputFrame.clarity >= this.minClarity &&
+          inputFrame.token
+        );
+
+        if (!hasClearSignal) {
+          // Brief dropout grace: preserve progress briefly, but DO NOT increment holdElapsed
+          if (this.phase === 'CANDIDATE' && this.holdElapsed > 0) {
+            this.dropoutElapsed += dt;
+            if (this.dropoutElapsed <= this.dropoutGraceSec) {
+              return {
+                authorizedEnemy: null,
+                progress: Math.min(1, this.holdElapsed / this.holdRequiredSec),
+                statusText: 'Hold steady...',
+                phase: 'CANDIDATE'
+              };
+            }
+          }
+          this.reset();
+          return { authorizedEnemy: null, progress: 0, statusText: 'Listening for note...', phase: 'LISTENING' };
+        }
+
+        // Check pitch stability (reject rapid frequency sweeps / vocal glissandos)
+        const cents = inputFrame.cents || 0;
+        if (this.lastPitchClass === inputFrame.pitchClass && dt > 0.001) {
+          const sweepRate = Math.abs(cents - this.lastCents) / dt;
+          if (sweepRate > this.maxSweepCentsPerSec) {
+            this.lastCents = cents;
+            // Reject sweep frame without accumulating hold time
+            return {
+              authorizedEnemy: null,
+              progress: Math.min(1, this.holdElapsed / this.holdRequiredSec),
+              statusText: 'Stabilize pitch (sweeping)',
+              phase: this.phase
+            };
+          }
+        }
+        this.lastCents = cents;
+        this.lastPitchClass = inputFrame.pitchClass;
+
+        // Check if within pitch tolerance (cents)
+        if (Math.abs(cents) > this.toleranceCents) {
+          // Out of tune: pause/decay slightly and give helpful tuning guidance
+          this.holdElapsed = Math.max(0, this.holdElapsed - dt * 0.5);
+          const dirText = cents < 0 ? 'Slightly flat — raise pitch' : 'Slightly sharp — lower pitch';
+          return {
+            authorizedEnemy: null,
+            progress: Math.min(1, this.holdElapsed / this.holdRequiredSec),
+            statusText: dirText,
+            phase: 'CANDIDATE'
+          };
+        }
+
+        // Find highest-priority visible enemy matching this candidate note
+        let matchedEnemy = null;
+        let shortestETA = Infinity;
+        for (const e of activeEnemies) {
+          if (e.targetedByPulse) continue;
+          if (areTargetsEquivalent(inputFrame.token, e.note, this.exactOctave)) {
+            if (e.eta < shortestETA) {
+              shortestETA = e.eta;
+              matchedEnemy = e;
+            }
+          }
+        }
+
+        if (!matchedEnemy) {
+          // Player is singing/playing a steady note, but no enemy has that note
+          this.holdElapsed = 0;
+          this.candidateToken = inputFrame.token;
+          this.targetEnemyId = null;
+          this.phase = 'CANDIDATE';
+          return {
+            authorizedEnemy: null,
+            progress: 0,
+            statusText: `Steady ${inputFrame.token} (no matching target)`,
+            phase: 'CANDIDATE'
+          };
+        }
+
+        // If candidate note or target changed, reset hold progress so unrelated notes never accumulate
+        if (
+          !this.candidateToken ||
+          !areTargetsEquivalent(this.candidateToken, inputFrame.token, this.exactOctave) ||
+          (this.targetEnemyId && this.targetEnemyId !== matchedEnemy.id)
+        ) {
+          this.candidateToken = inputFrame.token;
+          this.targetEnemyId = matchedEnemy.id;
+          this.holdElapsed = 0;
+          this.dropoutElapsed = 0;
+        }
+
+        this.phase = 'CANDIDATE';
+        this.dropoutElapsed = 0;
+        this.holdElapsed += dt;
+
+        const progress = Math.min(1, this.holdElapsed / this.holdRequiredSec);
+        if (this.holdElapsed >= this.holdRequiredSec) {
+          // Transition: STABLE_MATCH -> ATTACK -> REARM
+          this.phase = 'REARM';
+          this.rearmRemaining = this.rearmCooldownSec;
+          this.holdElapsed = 0;
+          return {
+            authorizedEnemy: matchedEnemy,
+            progress: 1,
+            statusText: `Locked ${matchedEnemy.note}! Pulse fired!`,
+            phase: 'ATTACK'
+          };
+        }
+
+        return {
+          authorizedEnemy: null,
+          progress,
+          statusText: `Hold steady on ${matchedEnemy.note}...`,
+          phase: 'CANDIDATE'
+        };
+      }
+    }
+
+    /********************************************************************
+     * 3. AUDIO ENGINE: MIC AUTOCORRELATION WITH CLARITY + SYNTH PIANO
+     ********************************************************************/
+    let audioCtx = null;
+    let analyser = null;
+    let micStream = null;
+    let micBuffer = null;
+    let micConnected = false;
+
+    const audioConfig = {
+      referenceA4: 440,
+      noiseFloorRms: 0.012,
+      sensitivityMultiplier: 1.0,
+      sfxVolume: 0.75,
+      pianoVolume: 0.85,
+      muted: false,
+      selfAudioSuppressionTimer: 0
+    };
+
+    // Smoothed UI Pitch History (prevents flickering)
+    const pitchHistory = [];
+
+    function ensureAudioContext() {
+      if (!audioCtx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) audioCtx = new AudioCtx();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    async function connectMicrophone() {
+      const readout = document.getElementById('setup-mic-readout');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        micConnected = false;
+        readout.textContent = 'Mic Status: Unavailable in browser';
+        return false;
+      }
+      try {
+        ensureAudioContext();
+        // Use raw musical pitch capture constraints where supported, fallback gracefully
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
+            }
+          });
+        } catch (_) {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+        micStream = stream;
+        const source = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        source.connect(analyser);
+        micBuffer = new Float32Array(analyser.fftSize);
+        micConnected = true;
+        readout.textContent = 'Mic Status: Connected & Listening';
+        document.getElementById('mic-dot').classList.add('active');
+        return true;
+      } catch (err) {
+        micConnected = false;
+        readout.textContent = 'Mic Status: Permission denied / Off';
+        return false;
+      }
+    }
+
+    async function calibrateRoomNoise() {
+      if (!micConnected) {
+        const ok = await connectMicrophone();
+        if (!ok) return;
+      }
+      const noiseEl = document.getElementById('setup-noise-readout');
+      noiseEl.textContent = 'Measuring quiet room (1s)...';
+      const samples = [];
+      const start = performance.now();
+      function sampleLoop() {
+        if (analyser && micBuffer) {
+          analyser.getFloatTimeDomainData(micBuffer);
+          let sum = 0;
+          for (let i = 0; i < micBuffer.length; i++) sum += micBuffer[i] * micBuffer[i];
+          samples.push(Math.sqrt(sum / micBuffer.length));
+        }
+        if (performance.now() - start < 900) {
+          requestAnimationFrame(sampleLoop);
+        } else {
+          const avg = samples.length ? samples.reduce((a, b) => a + b, 0) / samples.length : 0.012;
+          audioConfig.noiseFloorRms = Math.max(0.005, Math.min(0.08, avg * 1.45));
+          noiseEl.textContent = `Noise floor: ${audioConfig.noiseFloorRms.toFixed(3)}`;
+        }
+      }
+      sampleLoop();
+    }
+
+    /**
+     * Normalized Autocorrelation Pitch & Clarity Detector
+     */
+    function analyzeMicrophoneFrame(buf, sampleRate) {
+      const size = buf.length;
+      let rms = 0;
+      for (let i = 0; i < size; i++) rms += buf[i] * buf[i];
+      rms = Math.sqrt(rms / size);
+
+      const minRms = Math.max(audioConfig.noiseFloorRms * 1.85, 0.018 / audioConfig.sensitivityMultiplier);
+      if (rms < minRms) {
+        return { isValid: false, rms, clarity: 0, freq: -1 };
+      }
+
+      // Search lag range corresponding to 75 Hz .. 950 Hz
+      const minLag = Math.floor(sampleRate / 950);
+      const maxLag = Math.min(Math.floor(sampleRate / 75), Math.floor(size / 2));
+
+      let bestCorrelation = -1;
+      let bestLag = -1;
+      const correlations = new Float32Array(maxLag + 2);
+
+      // Find first zero/dip then global peak
+      let passedDip = false;
+      for (let lag = minLag; lag <= maxLag; lag++) {
+        let sum = 0;
+        let normA = 0;
+        let normB = 0;
+        const limit = size - maxLag;
+        for (let i = 0; i < limit; i++) {
+          const a = buf[i];
+          const b = buf[i + lag];
+          sum += a * b;
+          normA += a * a;
+          normB += b * b;
+        }
+        const denom = Math.sqrt(normA * normB);
+        const corr = denom > 1e-8 ? sum / denom : 0;
+        correlations[lag] = corr;
+
+        if (corr < 0.25) passedDip = true;
+        if (passedDip && corr > bestCorrelation) {
+          bestCorrelation = corr;
+          bestLag = lag;
+        }
+      }
+
+      if (bestLag <= minLag || bestCorrelation < 0.75) {
+        return { isValid: false, rms, clarity: Math.max(0, bestCorrelation), freq: -1 };
+      }
+
+      // Parabolic interpolation around bestLag
+      const y1 = correlations[bestLag - 1] || bestCorrelation;
+      const y2 = correlations[bestLag];
+      const y3 = correlations[bestLag + 1] || bestCorrelation;
+      const denom = 2 * (2 * y2 - y1 - y3);
+      const shift = Math.abs(denom) > 1e-6 ? (y3 - y1) / denom : 0;
+      const refinedLag = bestLag + Math.max(-0.5, Math.min(0.5, shift));
+
+      const freq = sampleRate / refinedLag;
+      if (freq < 75 || freq > 950) {
+        return { isValid: false, rms, clarity: 0, freq: -1 };
+      }
+
+      const noteNum = 12 * (Math.log(freq / audioConfig.referenceA4) / Math.log(2));
+      const nearestMidi = Math.round(noteNum) + 69;
+      const cents = Math.round((noteNum - Math.round(noteNum)) * 100);
+      const pitchClass = ((nearestMidi % 12) + 12) % 12;
+      const octave = Math.floor(nearestMidi / 12) - 1;
+      const baseName = DISPLAY_PITCH_NAMES[pitchClass];
+
+      return {
+        isValid: true,
+        rms,
+        clarity: bestCorrelation,
+        freq,
+        pitchClass,
+        octave,
+        cents,
+        token: `${baseName}${octave}`,
+        displayNote: baseName
+      };
+    }
+
+    // Warm Synthesized Piano Voices (Active Note Map for proper press & release)
+    const activePianoVoices = new Map(); // keyId -> { osc1, osc2, gain }
+
+    function midiToFreq(midi) {
+      return audioConfig.referenceA4 * Math.pow(2, (midi - 69) / 12);
+    }
+
+    function startPianoVoice(keyId, midi, suppressMic = true) {
+      if (audioConfig.muted) return;
+      ensureAudioContext();
+      if (!audioCtx) return;
+      if (activePianoVoices.has(keyId)) return;
+
+      if (suppressMic) {
+        audioConfig.selfAudioSuppressionTimer = Math.max(audioConfig.selfAudioSuppressionTimer, 0.35);
+      }
+
+      const now = audioCtx.currentTime;
+      const freq = midiToFreq(midi);
+      const vol = 0.18 * audioConfig.pianoVolume;
+
+      // Warm dual-oscillator + lowpass filter synthesized piano-like tone
+      const osc1 = audioCtx.createOscillator();
+      const osc2 = audioCtx.createOscillator();
+      const filter = audioCtx.createBiquadFilter();
+      const gain = audioCtx.createGain();
+
+      osc1.type = 'triangle';
+      osc2.type = 'sine';
+      osc1.frequency.setValueAtTime(freq, now);
+      osc2.frequency.setValueAtTime(freq * 2, now); // soft 2nd harmonic
+
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(freq * 4.5, now);
+      filter.frequency.exponentialRampToValueAtTime(freq * 1.8, now + 0.5);
+
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(vol, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(vol * 0.55, now + 0.45);
+
+      osc1.connect(filter);
+      osc2.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc1.start(now);
+      osc2.start(now);
+
+      activePianoVoices.set(keyId, { osc1, osc2, gain, midi });
+    }
+
+    function stopPianoVoice(keyId) {
+      const voice = activePianoVoices.get(keyId);
+      if (!voice || !audioCtx) return;
+      activePianoVoices.delete(keyId);
+
+      const now = audioCtx.currentTime;
+      try {
+        voice.gain.gain.cancelScheduledValues(now);
+        voice.gain.gain.setValueAtTime(Math.max(0.0001, voice.gain.gain.value), now);
+        voice.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+        voice.osc1.stop(now + 0.11);
+        voice.osc2.stop(now + 0.11);
+      } catch (_) {}
+      audioConfig.selfAudioSuppressionTimer = Math.max(audioConfig.selfAudioSuppressionTimer, 0.15);
+    }
+
+    function stopAllPianoVoices() {
+      Array.from(activePianoVoices.keys()).forEach(k => stopPianoVoice(k));
+    }
+
+    // Restrained, Non-Pitched / Short Musical Sound Effects
+    function playSfx(type) {
+      if (audioConfig.muted || audioConfig.sfxVolume <= 0.01) return;
+      ensureAudioContext();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      const vol = 0.12 * audioConfig.sfxVolume;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      if (type === 'click') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(620, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.045);
+        gain.gain.setValueAtTime(vol * 0.6, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.055);
+      } else if (type === 'launch') {
+        audioConfig.selfAudioSuppressionTimer = Math.max(audioConfig.selfAudioSuppressionTimer, 0.16);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.exponentialRampToValueAtTime(1040, now + 0.09);
+        gain.gain.setValueAtTime(vol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.10);
+        osc.start(now);
+        osc.stop(now + 0.11);
+      } else if (type === 'defeat') {
+        audioConfig.selfAudioSuppressionTimer = Math.max(audioConfig.selfAudioSuppressionTimer, 0.18);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(740, now);
+        osc.frequency.setValueAtTime(987, now + 0.045);
+        gain.gain.setValueAtTime(vol * 0.9, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+        osc.start(now);
+        osc.stop(now + 0.14);
+      } else if (type === 'damage') {
+        audioConfig.selfAudioSuppressionTimer = Math.max(audioConfig.selfAudioSuppressionTimer, 0.20);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(155, now);
+        osc.frequency.linearRampToValueAtTime(98, now + 0.14);
+        gain.gain.setValueAtTime(vol * 0.95, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+        osc.start(now);
+        osc.stop(now + 0.17);
+      } else if (type === 'wave') {
+        audioConfig.selfAudioSuppressionTimer = Math.max(audioConfig.selfAudioSuppressionTimer, 0.25);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.07);
+        osc.frequency.setValueAtTime(783.99, now + 0.14);
+        gain.gain.setValueAtTime(vol * 0.85, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      }
+    }
+
+    function playReferenceTone(freq = 440, duration = 0.55) {
+      ensureAudioContext();
+      if (!audioCtx) return;
+      // Suspend microphone scoring during reference tone + 160ms settling window
+      audioConfig.selfAudioSuppressionTimer = duration + 0.16;
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.18 * audioConfig.pianoVolume, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    }
+
+    /********************************************************************
+     * 4. AUTHENTIC WHITE & BLACK KEY PIANO + STRICT VALIDATION
+     ********************************************************************/
+    const PIANO_KEYS = [
+      { midi: 60, pc: 0,  name: 'C',  oct: 4, isBlack: false, bind: 'A' },
+      { midi: 61, pc: 1,  name: 'C♯', oct: 4, isBlack: true,  bind: 'W', leftPct: 12.5 },
+      { midi: 62, pc: 2,  name: 'D',  oct: 4, isBlack: false, bind: 'S' },
+      { midi: 63, pc: 3,  name: 'E♭', oct: 4, isBlack: true,  bind: 'E', leftPct: 25.0 },
+      { midi: 64, pc: 4,  name: 'E',  oct: 4, isBlack: false, bind: 'D' },
+      { midi: 65, pc: 5,  name: 'F',  oct: 4, isBlack: false, bind: 'F' },
+      { midi: 66, pc: 6,  name: 'F♯', oct: 4, isBlack: true,  bind: 'T', leftPct: 50.0 },
+      { midi: 67, pc: 7,  name: 'G',  oct: 4, isBlack: false, bind: 'G' },
+      { midi: 68, pc: 8,  name: 'A♭', oct: 4, isBlack: true,  bind: 'Y', leftPct: 62.5 },
+      { midi: 69, pc: 9,  name: 'A',  oct: 4, isBlack: false, bind: 'H' },
+      { midi: 70, pc: 10, name: 'B♭', oct: 4, isBlack: true,  bind: 'U', leftPct: 75.0 },
+      { midi: 71, pc: 11, name: 'B',  oct: 4, isBlack: false, bind: 'J' },
+      { midi: 72, pc: 0,  name: 'C5', oct: 5, isBlack: false, bind: 'K' }
+    ];
+
+    const KEYBOARD_TO_MIDI = {
+      'KeyA': 60, 'KeyW': 61, 'KeyS': 62, 'KeyE': 63, 'KeyD': 64,
+      'KeyF': 65, 'KeyT': 66, 'KeyG': 67, 'KeyY': 68, 'KeyH': 69,
+      'KeyU': 70, 'KeyJ': 71, 'KeyK': 72
+    };
+
+    const heldPianoMidis = new Set();
+    let heldChordName = null;
+
+    function buildPianoDOM() {
+      const container = document.getElementById('piano-keyboard');
+      container.innerHTML = '';
+
+      PIANO_KEYS.forEach(k => {
+        const el = document.createElement('div');
+        el.className = k.isBlack ? 'black-key' : 'white-key';
+        if (k.isBlack) {
+          el.style.left = `${k.leftPct}%`;
+        }
+        el.dataset.midi = k.midi;
+        el.innerHTML = `<span class="key-note-label">${k.name}</span><span class="key-bind-label">[${k.bind}]</span>`;
+
+        const press = (e) => {
+          e.preventDefault();
+          el.setPointerCapture(e.pointerId);
+          pressPianoMidi(k.midi);
+        };
+        const release = (e) => {
+          e.preventDefault();
+          releasePianoMidi(k.midi);
+        };
+
+        el.addEventListener('pointerdown', press);
+        el.addEventListener('pointerup', release);
+        el.addEventListener('pointercancel', release);
+        el.addEventListener('lostpointercapture', release);
+        container.appendChild(el);
+      });
+
+      // Build Chord Bar for Chord Mode
+      const chordBar = document.getElementById('chord-bar');
+      chordBar.innerHTML = '';
+      Object.keys(CHORD_DEFINITIONS).forEach(chordName => {
+        const btn = document.createElement('button');
+        btn.className = 'chord-chip';
+        btn.textContent = `${chordName} Chord`;
+        btn.dataset.chord = chordName;
+
+        const startChord = (e) => {
+          e.preventDefault();
+          btn.setPointerCapture(e.pointerId);
+          heldChordName = chordName;
+          btn.classList.add('pressed');
+          CHORD_DEFINITIONS[chordName].forEach((pc, idx) => {
+            startPianoVoice(`chord_${chordName}_${idx}`, 60 + pc, true);
+          });
+        };
+        const endChord = (e) => {
+          e.preventDefault();
+          if (heldChordName === chordName) heldChordName = null;
+          btn.classList.remove('pressed');
+          CHORD_DEFINITIONS[chordName].forEach((_, idx) => {
+            stopPianoVoice(`chord_${chordName}_${idx}`);
+          });
+        };
+
+        btn.addEventListener('pointerdown', startChord);
+        btn.addEventListener('pointerup', endChord);
+        btn.addEventListener('pointercancel', endChord);
+        chordBar.appendChild(btn);
+      });
+    }
+
+    function pressPianoMidi(midi) {
+      if (heldPianoMidis.has(midi)) return;
+      heldPianoMidis.add(midi);
+      startPianoVoice(`key_${midi}`, midi, true);
+      updatePianoKeyVisuals();
+    }
+
+    function releasePianoMidi(midi) {
+      if (!heldPianoMidis.has(midi)) return;
+      heldPianoMidis.delete(midi);
+      stopPianoVoice(`key_${midi}`);
+      updatePianoKeyVisuals();
+    }
+
+    function updatePianoKeyVisuals() {
+      document.querySelectorAll('#piano-keyboard [data-midi]').forEach(el => {
+        const m = parseInt(el.dataset.midi, 10);
+        el.classList.toggle('pressed', heldPianoMidis.has(m));
+      });
+    }
+
+    /**
+     * Evaluate held piano keys into a validated InputFrame.
+     * Rejects multi-key mashing on single-note targets and validates exact chord pitch-class sets!
+     */
+    function evaluatePianoInputFrame(activeEnemies) {
+      if (heldChordName) {
+        return {
+          isValid: true,
+          clarity: 0.99,
+          cents: 0,
+          pitchClass: CHORD_DEFINITIONS[heldChordName][0],
+          token: heldChordName,
+          displayNote: heldChordName
+        };
+      }
+
+      const count = heldPianoMidis.size;
+      if (count === 0) return null;
+
+      const midis = Array.from(heldPianoMidis).sort((a, b) => a - b);
+      const uniquePcs = Array.from(new Set(midis.map(m => ((m % 12) + 12) % 12)));
+
+      if (count === 1) {
+        const m = midis[0];
+        const pc = ((m % 12) + 12) % 12;
+        const oct = Math.floor(m / 12) - 1;
+        const baseName = DISPLAY_PITCH_NAMES[pc];
+        return {
+          isValid: true,
+          clarity: 0.99,
+          cents: 0,
+          pitchClass: pc,
+          octave: oct,
+          token: `${baseName}${oct}`,
+          displayNote: baseName
+        };
+      }
+
+      // If multiple keys are pressed: check if they form an exact defined chord!
+      for (const [chordName, reqPcs] of Object.entries(CHORD_DEFINITIONS)) {
+        const reqSet = new Set(reqPcs);
+        if (uniquePcs.length === reqSet.size && uniquePcs.every(pc => reqSet.has(pc))) {
+          return {
+            isValid: true,
+            clarity: 0.99,
+            cents: 0,
+            pitchClass: reqPcs[0],
+            token: chordName,
+            displayNote: chordName
+          };
+        }
+      }
+
+      // Otherwise: multi-key mashing! Reject immediately.
+      return {
+        isValid: false,
+        isMultiKeyError: true,
+        errorMsg: 'Multi-key mashing rejected — hold 1 clean note or exact chord!'
+      };
+    }
+
+    // Physical Keyboard Listeners (Isolated from Vocal Survival mode!)
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return; // Ignore OS key-repeat events as new musical attempts
+      if (e.code === 'Escape') {
+        if (state.running) togglePause();
+        return;
+      }
+      // Strictly forbid keyboard note shortcuts during Vocal / Microphone Survival!
+      if (state.mode === 'vocal') return;
+
+      const midi = KEYBOARD_TO_MIDI[e.code];
+      if (midi !== undefined && state.running && !state.paused) {
+        pressPianoMidi(midi);
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      const midi = KEYBOARD_TO_MIDI[e.code];
+      if (midi !== undefined) {
+        releasePianoMidi(midi);
+      }
+    });
+
+    /********************************************************************
+     * 5. EXPANDED 3D ARENA ("MELODY GARDEN") & UPGRADED MODELS
+     ********************************************************************/
+    const canvas = document.getElementById('three-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const scene = new THREE.Scene();
+
+    // Expanded Arena Constants
+    const ARENA_RADIUS = 16.5;
+    const SPAWN_RADIUS = 14.8;
+    const PROTECTIVE_RING_RADIUS = 2.45;
+    let frustumSize = 33.5;
+    const camera = new THREE.OrthographicCamera(-16, 16, 16, -16, 0.1, 150);
+
+    function updateCameraFrustum() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      renderer.setSize(width, height);
+      const aspect = width / Math.max(height, 1);
+
+      // Expanded arena framing that keeps targets large and readable on both laptop & mobile screens
+      frustumSize = aspect < 0.85 ? 36.0 / aspect : 33.5;
+
+      camera.left = (-frustumSize * aspect) / 2;
+      camera.right = (frustumSize * aspect) / 2;
+      camera.top = frustumSize / 2;
+      camera.bottom = -frustumSize / 2;
+
+      const angleRad = THREE.MathUtils.degToRad(63);
+      const dist = 46;
+      camera.position.set(0, Math.sin(angleRad) * dist, Math.cos(angleRad) * dist);
+      camera.lookAt(0, -1.1, 0);
+      camera.updateProjectionMatrix();
+    }
+    window.addEventListener('resize', updateCameraFrustum);
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xFFFDF9, 0.80);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xFFF5E4, 0.76);
+    dirLight.position.set(15, 32, 18);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    const sBound = 20;
+    dirLight.shadow.camera.left = -sBound;
+    dirLight.shadow.camera.right = sBound;
+    dirLight.shadow.camera.top = sBound;
+    dirLight.shadow.camera.bottom = -sBound;
+    scene.add(dirLight);
+
+    const MATS = {
+      stageIvory: new THREE.MeshStandardMaterial({ color: PALETTE.stageSurface, roughness: 0.65, metalness: 0.05 }),
+      stageRim: new THREE.MeshStandardMaterial({ color: 0xCFE3FA, roughness: 0.58 }),
+      navyAccent: new THREE.MeshStandardMaterial({ color: PALETTE.bgDeep, roughness: 0.7 }),
+      teal: new THREE.MeshStandardMaterial({ color: PALETTE.primaryTeal, roughness: 0.32, metalness: 0.1 }),
+      lavender: new THREE.MeshStandardMaterial({ color: PALETTE.secondaryLavender, roughness: 0.42 }),
+      coral: new THREE.MeshStandardMaterial({ color: PALETTE.playfulCoral, roughness: 0.38 }),
+      gold: new THREE.MeshStandardMaterial({ color: PALETTE.rewardGold, roughness: 0.3, metalness: 0.2 }),
+      blush: new THREE.MeshBasicMaterial({ color: 0xFFA8B6 }),
+      darkEye: new THREE.MeshBasicMaterial({ color: PALETTE.textDark }),
+      eyeHighlight: new THREE.MeshBasicMaterial({ color: 0xFFFFFF }),
+      cloudWhite: new THREE.MeshStandardMaterial({ color: 0xF5FAFF, roughness: 0.85 })
+    };
+
+    const arenaGroup = new THREE.Group();
+    scene.add(arenaGroup);
+
+    // Expanded Circular Stage Floor
+    const stageMesh = new THREE.Mesh(new THREE.CylinderGeometry(ARENA_RADIUS, ARENA_RADIUS * 0.94, 1.6, 72), MATS.stageIvory);
+    stageMesh.position.y = -0.8;
+    stageMesh.receiveShadow = true;
+    arenaGroup.add(stageMesh);
+
+    const rimMesh = new THREE.Mesh(new THREE.TorusGeometry(ARENA_RADIUS - 0.18, 0.28, 16, 72), MATS.stageRim);
+    rimMesh.rotation.x = Math.PI / 2;
+    rimMesh.position.y = 0.02;
+    arenaGroup.add(rimMesh);
+
+    // Concentric Distance Rings + Subtle Radial Lanes
+    [5.2, 8.4, 11.6, SPAWN_RADIUS].forEach((r, idx) => {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(r - 0.06, r + 0.06, 72),
+        new THREE.MeshBasicMaterial({
+          color: idx === 3 ? PALETTE.secondaryLavender : 0xC2DAF6,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: idx === 3 ? 0.55 : 0.65
+        })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.015;
+      arenaGroup.add(ring);
+    });
+
+    // Protective Boundary Ring + Player Shield Aura
+    const protectiveRingMat = new THREE.MeshStandardMaterial({
+      color: PALETTE.primaryTeal,
+      emissive: PALETTE.primaryTeal,
+      emissiveIntensity: 0.45,
+      roughness: 0.25
+    });
+    const protectiveRingMesh = new THREE.Mesh(new THREE.TorusGeometry(PROTECTIVE_RING_RADIUS, 0.13, 16, 64), protectiveRingMat);
+    protectiveRingMesh.rotation.x = Math.PI / 2;
+    protectiveRingMesh.position.y = 0.06;
+    arenaGroup.add(protectiveRingMesh);
+
+    const shieldMat = new THREE.MeshBasicMaterial({
+      color: PALETTE.rewardGold,
+      transparent: true,
+      opacity: 0.0,
+      side: THREE.DoubleSide
+    });
+    const shieldDome = new THREE.Mesh(new THREE.SphereGeometry(1.45, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), shieldMat);
+    shieldDome.position.y = 0.05;
+    arenaGroup.add(shieldDome);
+
+    // Decorative Speaker Towers & Musical Arch on Outer Perimeter
+    const speakerMeshes = [];
+    function createSpeakerTower(x, z, rotY) {
+      const group = new THREE.Group();
+      const box = new THREE.Mesh(new THREE.BoxGeometry(2.1, 3.2, 1.7), MATS.stageIvory);
+      box.position.y = 1.6;
+      box.castShadow = true;
+      group.add(box);
+
+      const cone1 = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.45, 0.2, 24), MATS.navyAccent);
+      cone1.rotation.x = Math.PI / 2;
+      cone1.position.set(0, 1.25, 0.82);
+      group.add(cone1);
+
+      const cone2 = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.28, 0.2, 24), MATS.lavender);
+      cone2.rotation.x = Math.PI / 2;
+      cone2.position.set(0, 2.45, 0.82);
+      group.add(cone2);
+
+      group.position.set(x, 0, z);
+      group.rotation.y = rotY;
+      arenaGroup.add(group);
+      speakerMeshes.push(group);
+    }
+    createSpeakerTower(-15.5, -6.5, 0.45);
+    createSpeakerTower(15.5, -6.5, -0.45);
+
+    // Distant Musical Arch at Back Perimeter
+    const archGroup = new THREE.Group();
+    const archTorus = new THREE.Mesh(new THREE.TorusGeometry(4.2, 0.28, 16, 48, Math.PI), MATS.lavender);
+    archTorus.position.set(0, 0, -ARENA_RADIUS + 0.4);
+    archGroup.add(archTorus);
+    arenaGroup.add(archGroup);
+
+    // Musical Symbol Plants around Outer Rim
+    [-2.7, -2.1, -1.45, -0.75, 0.75, 2.1, 2.7].forEach((ang, i) => {
+      const group = new THREE.Group();
+      const r = ARENA_RADIUS - 0.65;
+      const mat = i % 2 === 0 ? MATS.lavender : MATS.coral;
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 1.1, 12), mat);
+      stem.position.y = 0.55;
+      group.add(stem);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 16), mat);
+      head.position.set(0.22, 1.1, 0);
+      group.add(head);
+      group.position.set(Math.cos(ang) * r, 0, Math.sin(ang) * r);
+      group.lookAt(0, 0.5, 0);
+      arenaGroup.add(group);
+    });
+
+    // Soft Floating Clouds
+    const clouds = [];
+    [
+      [-20, -1.8, -9, 1.5],
+      [20, -1.5, -8.5, 1.55],
+      [-19, -2.2, 10, 1.35],
+      [19, -2.0, 9.5, 1.4],
+      [0, -2.8, -20, 1.7]
+    ].forEach(([x, y, z, sc]) => {
+      const group = new THREE.Group();
+      [[0,0,0,1.3], [1.1,-0.15,0.2,0.95], [-1.05,-0.2,-0.1,0.9], [0.4,0.45,-0.3,0.85]].forEach(([ox,oy,oz,r]) => {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 16), MATS.cloudWhite);
+        puff.position.set(ox, oy, oz);
+        group.add(puff);
+      });
+      group.position.set(x, y, z);
+      group.scale.setScalar(sc);
+      scene.add(group);
+      clouds.push({ group, baseY: y, phase: Math.random() * Math.PI * 2 });
+    });
+
+    // Upgraded Cute Central Musical Guardian
+    const guardianGroup = new THREE.Group();
+    guardianGroup.position.set(0, 0.15, 0);
+    scene.add(guardianGroup);
+
+    const bodyMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.72, 1.1, 24), MATS.lavender);
+    bodyMesh.position.y = 0.55;
+    bodyMesh.castShadow = true;
+    guardianGroup.add(bodyMesh);
+
+    const collarMesh = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.09, 12, 24), MATS.gold);
+    collarMesh.rotation.x = Math.PI / 2;
+    collarMesh.position.y = 1.05;
+    guardianGroup.add(collarMesh);
+
+    const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.58, 24, 24), MATS.stageIvory);
+    headMesh.position.y = 1.58;
+    headMesh.castShadow = true;
+    guardianGroup.add(headMesh);
+
+    // Cute Music-Note Beret Hat + Headphones
+    const beretMesh = new THREE.Mesh(new THREE.SphereGeometry(0.46, 20, 16), MATS.coral);
+    beretMesh.scale.set(1.15, 0.45, 1.15);
+    beretMesh.position.set(0, 2.06, -0.05);
+    guardianGroup.add(beretMesh);
+
+    [-0.2, 0.2].forEach(xPos => {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 12), MATS.darkEye);
+      eye.position.set(xPos, 1.6, 0.52);
+      guardianGroup.add(eye);
+      const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), MATS.blush);
+      cheek.position.set(xPos * 1.45, 1.48, 0.48);
+      guardianGroup.add(cheek);
+    });
+
+    // Resonance Microphone Staff
+    const staffGroup = new THREE.Group();
+    staffGroup.position.set(0.68, 0.85, 0.42);
+    staffGroup.rotation.x = 0.25;
+    guardianGroup.add(staffGroup);
+
+    const handleMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.4, 12), MATS.navyAccent);
+    handleMesh.position.y = 0.25;
+    staffGroup.add(handleMesh);
+
+    const micHeadMat = new THREE.MeshStandardMaterial({
+      color: PALETTE.primaryTeal,
+      emissive: PALETTE.primaryTeal,
+      emissiveIntensity: 0.35,
+      roughness: 0.2
+    });
+    const micHeadMesh = new THREE.Mesh(new THREE.SphereGeometry(0.26, 16, 16), micHeadMat);
+    micHeadMesh.position.y = 1.05;
+    staffGroup.add(micHeadMesh);
+
+    const staffChargeMat = new THREE.MeshBasicMaterial({ color: PALETTE.rewardGold, transparent: true, opacity: 0 });
+    const staffChargeRing = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.06, 12, 32), staffChargeMat);
+    staffChargeRing.position.y = 1.05;
+    staffGroup.add(staffChargeRing);
+
+    /********************************************************************
+     * 6. ENEMY MODELS (SCALED FOR READABILITY + EXPRESSIVE FACES)
+     ********************************************************************/
+    const SHARED_GEOS = {
+      sphere: new THREE.SphereGeometry(0.65, 22, 22),
+      eye: new THREE.SphereGeometry(0.085, 12, 12),
+      pupilGlow: new THREE.SphereGeometry(0.032, 8, 8),
+      cheek: new THREE.SphereGeometry(0.085, 10, 10),
+      stem: new THREE.CylinderGeometry(0.095, 0.095, 1.15, 12),
+      flag: new THREE.BoxGeometry(0.5, 0.2, 0.1),
+      metroBody: new THREE.ConeGeometry(0.68, 1.45, 4),
+      pendulum: new THREE.BoxGeometry(0.07, 0.98, 0.07),
+      bassBody: new THREE.SphereGeometry(0.86, 24, 24),
+      pulseCore: new THREE.SphereGeometry(0.28, 16, 16),
+      trailOrb: new THREE.SphereGeometry(0.14, 10, 10),
+      confetti: new THREE.BoxGeometry(0.18, 0.18, 0.18)
+    };
+
+    function addExpressiveFace(parent, yEye, zFront, spread = 0.21) {
+      [-spread, spread].forEach(x => {
+        const eye = new THREE.Mesh(SHARED_GEOS.eye, MATS.darkEye);
+        eye.position.set(x, yEye, zFront);
+        parent.add(eye);
+        const glint = new THREE.Mesh(SHARED_GEOS.pupilGlow, MATS.eyeHighlight);
+        glint.position.set(x + 0.025, yEye + 0.03, zFront + 0.065);
+        parent.add(glint);
+        const cheek = new THREE.Mesh(SHARED_GEOS.cheek, MATS.blush);
+        cheek.scale.set(1.2, 0.7, 0.6);
+        cheek.position.set(x * 1.45, yEye - 0.11, zFront - 0.03);
+        parent.add(cheek);
+      });
+    }
+
+    function buildEnemyMesh(type) {
+      const root = new THREE.Group();
+      const visual = new THREE.Group();
+      root.add(visual);
+
+      if (type === 'sprite') {
+        const body = new THREE.Mesh(SHARED_GEOS.sphere, MATS.coral);
+        body.scale.set(1.12, 0.94, 1.02);
+        body.position.y = 0.62;
+        body.castShadow = true;
+        visual.add(body);
+
+        const stem = new THREE.Mesh(SHARED_GEOS.stem, MATS.coral);
+        stem.position.set(0.42, 1.35, 0);
+        visual.add(stem);
+
+        const flag = new THREE.Mesh(SHARED_GEOS.flag, MATS.gold);
+        flag.position.set(0.62, 1.82, 0);
+        flag.rotation.z = -0.35;
+        visual.add(flag);
+
+        addExpressiveFace(visual, 0.66, 0.60, 0.22);
+      } else if (type === 'metronome') {
+        const cone = new THREE.Mesh(SHARED_GEOS.metroBody, MATS.gold);
+        cone.position.y = 0.75;
+        cone.rotation.y = Math.PI / 4;
+        cone.castShadow = true;
+        visual.add(cone);
+
+        const pend = new THREE.Mesh(SHARED_GEOS.pendulum, MATS.navyAccent);
+        pend.position.set(0, 0.75, 0.42);
+        pend.name = 'pendulum';
+        visual.add(pend);
+
+        addExpressiveFace(visual, 0.52, 0.48, 0.17);
+      } else if (type === 'bass') {
+        const blob = new THREE.Mesh(SHARED_GEOS.bassBody, MATS.lavender);
+        blob.scale.set(1.25, 0.88, 1.18);
+        blob.position.y = 0.72;
+        blob.castShadow = true;
+        visual.add(blob);
+
+        const crest = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.075, 10, 20, Math.PI * 1.4), MATS.gold);
+        crest.position.set(-0.05, 1.52, 0);
+        visual.add(crest);
+
+        addExpressiveFace(visual, 0.76, 0.92, 0.28);
+      } else if (type === 'chord') {
+        [
+          [-0.54, 0.78, 0, MATS.teal],
+          [0.54, 0.78, 0, MATS.lavender],
+          [0, 0.98, 0.26, MATS.coral]
+        ].forEach(([x, y, z, mat]) => {
+          const puff = new THREE.Mesh(SHARED_GEOS.sphere, mat);
+          puff.scale.setScalar(0.82);
+          puff.position.set(x, y, z);
+          puff.castShadow = true;
+          visual.add(puff);
+        });
+        addExpressiveFace(visual, 0.96, 0.72, 0.20);
+      }
+
+      const baseRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.82, 1.02, 28),
+        new THREE.MeshBasicMaterial({ color: PALETTE.primaryTeal, side: THREE.DoubleSide, transparent: true, opacity: 0.28 })
+      );
+      baseRing.rotation.x = -Math.PI / 2;
+      baseRing.position.y = 0.03;
+      root.add(baseRing);
+
+      return { root, visual, baseRing };
+    }
+
+    /********************************************************************
+     * 7. HEALTH SYSTEM, ENEMY ATTACK CYCLES & GRADUAL ACCIDENTALS
+     ********************************************************************/
+    const state = {
+      mode: 'vocal', // 'vocal' | 'piano' | 'chord' | 'practice'
+      running: false,
+      paused: false,
+      reducedMotion: false,
+      hp: 100,
+      maxHp: 100,
+      damageProtectionTimer: 0, // Invulnerability grace after taking a hit
+      score: 0,
+      bestScores: { vocal: 0, piano: 0, chord: 0, practice: 0 },
+      combo: 1,
+      bestCombo: 1,
+      wave: 1,
+      elapsedTime: 0,
+      defeatedCount: 0,
+      spawnTimer: 0,
+      lastSpawnAngle: 0,
+      guardianTargetAngle: 0,
+      guardianRecoil: 0
+    };
+
+    const pitchMatcher = new PitchMatchStateMachine();
+    const enemies = [];
+    const projectiles = [];
+    const impactRings = [];
+    const particles = [];
+    const labelsLayer = document.getElementById('labels-layer');
+
+    // Gradual Note & Accidental Vocabulary Progression by Wave
+    function getWaveVocabulary(wave, mode) {
+      const exactOct = document.getElementById('sel-octave-mode').value === 'exact';
+      const suffix = exactOct ? '4' : '';
+
+      if (mode === 'chord') {
+        if (wave === 1) return [`C${suffix}`, `G${suffix}`, 'Cmaj', 'Am'];
+        if (wave === 2) return [`C${suffix}`, `F${suffix}`, `G${suffix}`, 'Cmaj', 'Am', 'Fmaj', 'G7'];
+        return [`C${suffix}`, `D${suffix}`, `F♯${suffix}`, `B♭${suffix}`, 'Cmaj', 'Am', 'Fmaj', 'G7', 'Dm', 'Em'];
+      }
+      // Introduce naturals first, then F♯/C♯, then B♭/E♭ gradually without spiking speed at the same time
+      if (wave === 1) return ['C', 'D', 'E', 'G'].map(n => n + suffix);
+      if (wave === 2) return ['C', 'D', 'E', 'F', 'G', 'A'].map(n => n + suffix);
+      if (wave === 3) return ['C', 'D', 'E', 'F', 'F♯', 'G', 'A'].map(n => n + suffix);
+      if (wave === 4) return ['C', 'C♯', 'D', 'E', 'F', 'F♯', 'G', 'A', 'B♭'].map(n => n + suffix);
+      return ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A', 'B♭', 'B'].map(n => n + suffix);
+    }
+
+    // Assign non-overlapping perimeter slots around the boundary ring
+    function findAvailableBoundaryAngle(preferredAngle) {
+      const minSep = 0.42; // radians (~24 degrees)
+      let candidate = preferredAngle;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const conflict = enemies.some(other => {
+          const diff = Math.abs(Math.atan2(Math.sin(candidate - other.slotAngle), Math.cos(candidate - other.slotAngle)));
+          return diff < minSep && other.distance < PROTECTIVE_RING_RADIUS + 3.0;
+        });
+        if (!conflict) return candidate;
+        candidate += (attempt % 2 === 0 ? 1 : -1) * minSep * Math.ceil((attempt + 1) / 2);
+      }
+      return preferredAngle;
+    }
+
+    function spawnEnemy() {
+      const pool = getWaveVocabulary(state.wave, state.mode);
+      const note = pool[Math.floor(Math.random() * pool.length)];
+      const parsed = parseNoteToken(note);
+      const isChord = parsed && parsed.isChord;
+
+      // Balanced speed progression: when new accidentals enter on waves 3 & 4, keep speed gentle
+      const speedWaveFactor = Math.min(state.wave, 6) * 0.055;
+      let type = 'sprite';
+      let speed = 1.15 + speedWaveFactor;
+
+      if (isChord) {
+        type = 'chord';
+        speed = 0.98 + speedWaveFactor * 0.8;
+      } else {
+        const roll = Math.random();
+        if (state.wave >= 2 && roll < 0.25) {
+          type = 'metronome';
+          speed = 1.55 + speedWaveFactor;
+        } else if (roll < 0.55) {
+          type = 'bass';
+          speed = 0.85 + speedWaveFactor * 0.7;
+        }
+      }
+
+      const stepAngle = (Math.PI * 2) / Math.min(4 + state.wave, 10);
+      const angle = state.lastSpawnAngle + stepAngle * (1 + Math.floor(Math.random() * 2)) + (Math.random() - 0.5) * 0.35;
+      state.lastSpawnAngle = angle;
+
+      const { root, visual, baseRing } = buildEnemyMesh(type);
+      root.position.set(Math.cos(angle) * SPAWN_RADIUS, 0, Math.sin(angle) * SPAWN_RADIUS);
+      root.lookAt(0, 0, 0);
+      scene.add(root);
+
+      // High-Contrast Upright Badge (NO click-to-win shortcut!)
+      const badge = document.createElement('div');
+      badge.className = 'enemy-badge';
+      const pc = parsed ? (parsed.isChord ? parsed.rootPc : parsed.pitchClass) : 0;
+      const dotColor = NOTE_COLORS[pc] || '#36D6C5';
+      badge.innerHTML = `<span class="note-dot" style="background:${dotColor}"></span><span>${note}</span>`;
+      labelsLayer.appendChild(badge);
+
+      enemies.push({
+        id: Math.random().toString(36).slice(2),
+        type,
+        note,
+        speed,
+        angle,
+        slotAngle: findAvailableBoundaryAngle(angle),
+        distance: SPAWN_RADIUS,
+        eta: (SPAWN_RADIUS - PROTECTIVE_RING_RADIUS) / speed,
+        spawnWarmup: 0.50,
+        // Attack cycle state machine once enemy reaches boundary ring
+        combatState: 'APPROACHING', // APPROACHING | WINDUP | COOLDOWN
+        combatTimer: 0,
+        windupDuration: 0.78,
+        cooldownDuration: 1.75,
+        damagePerHit: type === 'bass' ? 12 : 10,
+        root,
+        visual,
+        baseRing,
+        badge,
+        phase: Math.random() * Math.PI * 2,
+        targetedByPulse: false
+      });
+    }
+
+    function applyPlayerDamage(amount, sourceEnemy) {
+      if (state.mode === 'practice') return; // Practice mode has no HP drain
+      if (state.damageProtectionTimer > 0) return; // Brief damage protection prevents instant stacked drain
+
+      state.hp = Math.max(0, state.hp - amount);
+      state.damageProtectionTimer = 0.50; // 500ms protection shield
+      state.combo = 1;
+      shieldMat.opacity = 0.55;
+
+      playSfx('damage');
+
+      const hpCard = document.getElementById('hp-card');
+      hpCard.classList.add('damage-flash');
+      setTimeout(() => hpCard.classList.remove('damage-flash'), 360);
+
+      // Floating Damage Popup
+      const screenPos = worldToScreen(new THREE.Vector3(0, 2.3, 0));
+      const pop = document.createElement('div');
+      pop.className = 'score-popup damage-popup';
+      pop.style.left = `${screenPos.x}px`;
+      pop.style.top = `${screenPos.y}px`;
+      pop.textContent = `-${amount} HP`;
+      labelsLayer.appendChild(pop);
+      setTimeout(() => pop.remove(), 850);
+
+      updateHUD();
+
+      if (state.hp <= 0) {
+        triggerGameOver();
+      }
+    }
+
+    function launchMusicalPulse(enemy) {
+      // Lock target immediately so enemy cannot deal unfair last-moment contact damage while pulse is in flight
+      enemy.targetedByPulse = true;
+      enemy.combatState = 'LOCKED';
+
+      const dx = enemy.root.position.x;
+      const dz = enemy.root.position.z;
+      state.guardianTargetAngle = Math.atan2(dx, dz);
+      state.guardianRecoil = 0.18;
+
+      const pulseGroup = new THREE.Group();
+      const core = new THREE.Mesh(SHARED_GEOS.pulseCore, MATS.teal);
+      pulseGroup.add(core);
+
+      const halo = new THREE.Mesh(
+        new THREE.TorusGeometry(0.42, 0.065, 10, 24),
+        new THREE.MeshBasicMaterial({ color: PALETTE.rewardGold })
+      );
+      halo.rotation.x = Math.PI / 2;
+      pulseGroup.add(halo);
+
+      // 3D Trail Orbs
+      const trailMeshes = [];
+      for (let t = 0; t < 3; t++) {
+        const orb = new THREE.Mesh(SHARED_GEOS.trailOrb, t % 2 === 0 ? MATS.gold : MATS.teal);
+        orb.scale.setScalar(1 - t * 0.25);
+        scene.add(orb);
+        trailMeshes.push(orb);
+      }
+
+      const startPos = new THREE.Vector3(
+        Math.sin(state.guardianTargetAngle) * 0.9,
+        1.15,
+        Math.cos(state.guardianTargetAngle) * 0.9
+      );
+      pulseGroup.position.copy(startPos);
+      scene.add(pulseGroup);
+
+      projectiles.push({
+        mesh: pulseGroup,
+        trailMeshes,
+        history: [startPos.clone(), startPos.clone(), startPos.clone()],
+        target: enemy,
+        progress: 0,
+        startPos
+      });
+
+      playSfx('launch');
+    }
+
+    function defeatEnemy(enemy) {
+      const idx = enemies.indexOf(enemy);
+      if (idx === -1) return;
+      enemies.splice(idx, 1);
+
+      const points = 100 * state.combo;
+      state.score += points;
+      state.bestScores[state.mode] = Math.max(state.bestScores[state.mode] || 0, state.score);
+      state.combo = Math.min(state.combo + 1, 12);
+      state.bestCombo = Math.max(state.bestCombo, state.combo);
+      state.defeatedCount++;
+
+      const newWave = 1 + Math.floor(state.defeatedCount / 6);
+      if (newWave > state.wave) {
+        state.wave = newWave;
+        playSfx('wave');
+      } else {
+        playSfx('defeat');
+      }
+
+      const scoreCard = document.getElementById('score-card');
+      if (state.combo % 3 === 0) {
+        scoreCard.classList.add('combo-glow');
+        setTimeout(() => scoreCard.classList.remove('combo-glow'), 450);
+      }
+
+      // 3D Impact Ring + Musical Confetti
+      const ringMesh = new THREE.Mesh(
+        new THREE.RingGeometry(0.4, 0.65, 28),
+        new THREE.MeshBasicMaterial({ color: PALETTE.rewardGold, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+      );
+      ringMesh.rotation.x = -Math.PI / 2;
+      ringMesh.position.copy(enemy.root.position);
+      ringMesh.position.y = 0.08;
+      scene.add(ringMesh);
+      impactRings.push({ mesh: ringMesh, life: 0.35 });
+
+      const count = state.reducedMotion ? 4 : 12;
+      const colors = [MATS.teal, MATS.coral, MATS.gold, MATS.lavender];
+      for (let i = 0; i < count; i++) {
+        const mesh = new THREE.Mesh(SHARED_GEOS.confetti, colors[i % colors.length]);
+        mesh.position.copy(enemy.root.position);
+        mesh.position.y += 0.75;
+        scene.add(mesh);
+        const ang = (Math.PI * 2 * i) / count + Math.random() * 0.35;
+        const spd = 2.4 + Math.random() * 2.6;
+        particles.push({
+          mesh,
+          vx: Math.cos(ang) * spd,
+          vy: 2.8 + Math.random() * 2.2,
+          vz: Math.sin(ang) * spd,
+          life: 0.50
+        });
+      }
+
+      const screenPos = worldToScreen(enemy.root.position.clone().add(new THREE.Vector3(0, 1.5, 0)));
+      const pop = document.createElement('div');
+      pop.className = 'score-popup';
+      pop.style.left = `${screenPos.x}px`;
+      pop.style.top = `${screenPos.y}px`;
+      pop.textContent = `+${points}`;
+      labelsLayer.appendChild(pop);
+      setTimeout(() => pop.remove(), 820);
+
+      scene.remove(enemy.root);
+      enemy.badge.remove();
+      updateHUD();
+    }
+
+    function worldToScreen(vec3) {
+      const v = vec3.clone().project(camera);
+      return {
+        x: (v.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-(v.y * 0.5) + 0.5) * window.innerHeight
+      };
+    }
+
+    function updateHUD() {
+      const hpPct = Math.max(0, Math.min(100, (state.hp / state.maxHp) * 100));
+      document.getElementById('hud-hp-text').textContent = state.mode === 'practice' ? 'PRACTICE (∞)' : `${state.hp} / ${state.maxHp}`;
+      const hpFill = document.getElementById('hud-hp-fill');
+      hpFill.style.width = `${hpPct}%`;
+      hpFill.className = 'hp-fill' + (hpPct <= 30 ? ' low' : hpPct <= 60 ? ' mid' : '');
+
+      document.getElementById('hud-score').textContent = state.score.toLocaleString();
+      document.getElementById('hud-combo').textContent = `${state.combo}x`;
+      document.getElementById('hud-wave').textContent = String(state.wave).padStart(2, '0');
+
+      const mins = Math.floor(state.elapsedTime / 60);
+      const secs = Math.floor(state.elapsedTime % 60);
+      document.getElementById('hud-time').textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    /********************************************************************
+     * 8. MAIN GAMEPLAY & VALIDATION LOOP
+     ********************************************************************/
+    let lastTime = performance.now();
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+
+      // Update Microphone Setup Level Bar if Start Modal is open
+      if (micConnected && analyser && micBuffer && !document.getElementById('start-modal').classList.contains('hidden')) {
+        analyser.getFloatTimeDomainData(micBuffer);
+        let sum = 0;
+        for (let i = 0; i < micBuffer.length; i++) sum += micBuffer[i] * micBuffer[i];
+        const rms = Math.sqrt(sum / micBuffer.length);
+        const pct = Math.min(100, Math.round(rms * 420 * audioConfig.sensitivityMultiplier));
+        document.getElementById('setup-level-fill').style.width = `${pct}%`;
+      }
+
+      if (!state.reducedMotion) {
+        clouds.forEach(c => {
+          c.group.position.y = c.baseY + Math.sin(now * 0.0011 + c.phase) * 0.2;
+        });
+        const pulseScale = 1 + Math.sin(now * 0.0055) * 0.022;
+        speakerMeshes.forEach(s => s.scale.set(pulseScale, pulseScale, pulseScale));
+      }
+
+      // Smoothly rotate central guardian & decay launch recoil
+      const angleDiff = Math.atan2(
+        Math.sin(state.guardianTargetAngle - guardianGroup.rotation.y),
+        Math.cos(state.guardianTargetAngle - guardianGroup.rotation.y)
+      );
+      guardianGroup.rotation.y += angleDiff * Math.min(1, dt * 12);
+      if (state.guardianRecoil > 0) {
+        state.guardianRecoil = Math.max(0, state.guardianRecoil - dt * 1.2);
+        staffGroup.position.z = 0.42 - state.guardianRecoil * 0.6;
+      } else {
+        staffGroup.position.z = 0.42;
+      }
+
+      if (!state.running || state.paused) {
+        renderer.render(scene, camera);
+        return;
+      }
+
+      state.elapsedTime += dt;
+      if (audioConfig.selfAudioSuppressionTimer > 0) {
+        audioConfig.selfAudioSuppressionTimer = Math.max(0, audioConfig.selfAudioSuppressionTimer - dt);
+      }
+      if (state.damageProtectionTimer > 0) {
+        state.damageProtectionTimer = Math.max(0, state.damageProtectionTimer - dt);
+        shieldMat.opacity = (state.damageProtectionTimer / 0.50) * 0.45;
+      } else {
+        shieldMat.opacity = 0;
+      }
+
+      updateHUD();
+
+      // Spawn Pacing
+      state.spawnTimer -= dt;
+      const maxEnemies = state.mode === 'practice' ? 3 : Math.min(3 + Math.floor(state.wave / 2), 6);
+      if (state.spawnTimer <= 0 && enemies.length < maxEnemies) {
+        spawnEnemy();
+        state.spawnTimer = Math.max(1.55, 3.1 - state.wave * 0.18);
+      }
+
+      // 1. Update Enemies, Perimeter Spacing & Attack Cycles
+      let urgentEnemy = null;
+      let shortestETA = Infinity;
+      let boundaryDanger = false;
+
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const e = enemies[i];
+        if (e.spawnWarmup > 0) {
+          e.spawnWarmup -= dt;
+          e.visual.scale.setScalar(1 - (e.spawnWarmup / 0.50) * 0.5);
+        } else if (!e.targetedByPulse) {
+          if (e.distance > PROTECTIVE_RING_RADIUS + 0.15) {
+            e.distance -= e.speed * dt;
+            // Smoothly steer toward assigned perimeter slot angle as enemy nears boundary
+            const blend = Math.max(0, Math.min(1, ( SPAWN_RADIUS - e.distance ) / (SPAWN_RADIUS - PROTECTIVE_RING_RADIUS)));
+            const curAngle = e.angle + Math.atan2(Math.sin(e.slotAngle - e.angle), Math.cos(e.slotAngle - e.angle)) * blend;
+            e.root.position.set(Math.cos(curAngle) * e.distance, 0, Math.sin(curAngle) * e.distance);
+            e.root.lookAt(0, 0, 0);
+            e.combatState = 'APPROACHING';
+          } else {
+            // Reached Protective Boundary Ring: Execute Wind-up -> Impact -> Cooldown Cycle
+            e.distance = PROTECTIVE_RING_RADIUS + 0.12;
+            e.root.position.set(Math.cos(e.slotAngle) * e.distance, 0, Math.sin(e.slotAngle) * e.distance);
+            e.root.lookAt(0, 0, 0);
+            boundaryDanger = true;
+
+            if (e.combatState === 'APPROACHING') {
+              e.combatState = 'WINDUP';
+              e.combatTimer = e.windupDuration;
+            } else if (e.combatState === 'WINDUP') {
+              e.combatTimer -= dt;
+              const windProg = 1 - Math.max(0, e.combatTimer / e.windupDuration);
+              e.visual.position.z = -windProg * 0.35; // Lean back before strike
+              e.baseRing.material.color.setHex(PALETTE.playfulCoral);
+              e.baseRing.material.opacity = 0.5 + windProg * 0.45;
+
+              if (e.combatTimer <= 0) {
+                // IMPACT EVENT (Deals damage once, then enters cooldown)
+                e.visual.position.z = 0.25;
+                applyPlayerDamage(e.damagePerHit, e);
+                e.combatState = 'COOLDOWN';
+                e.combatTimer = e.cooldownDuration;
+              }
+            } else if (e.combatState === 'COOLDOWN') {
+              e.combatTimer -= dt;
+              e.visual.position.z *= 0.85;
+              e.baseRing.material.color.setHex(PALETTE.rewardGold);
+              e.baseRing.material.opacity = 0.4;
+              if (e.combatTimer <= 0) {
+                e.combatState = 'WINDUP';
+                e.combatTimer = e.windupDuration;
+              }
+            }
+          }
+        }
+
+        // Idle & Movement Silhouette Animations
+        if (!state.reducedMotion && e.spawnWarmup <= 0) {
+          const t = now * 0.006 + e.phase;
+          if (e.type === 'sprite') {
+            e.visual.position.y = Math.abs(Math.sin(t * 1.4)) * 0.34;
+          } else if (e.type === 'metronome') {
+            e.visual.position.y = Math.abs(Math.sin(t * 2.5)) * 0.15;
+            const pend = e.visual.getObjectByName('pendulum');
+            if (pend) pend.rotation.z = Math.sin(t * 3.2) * 0.48;
+          } else if (e.type === 'bass') {
+            const sq = 1 + Math.sin(t * 1.1) * 0.12;
+            e.visual.scale.set(sq, 1 / sq, sq);
+          } else if (e.type === 'chord') {
+            e.visual.position.y = 0.15 + Math.sin(t * 1.2) * 0.18;
+          }
+        }
+
+        const distToRing = Math.max(0, e.distance - PROTECTIVE_RING_RADIUS);
+        e.eta = distToRing / e.speed;
+        if (!e.targetedByPulse && e.eta < shortestETA) {
+          shortestETA = e.eta;
+          urgentEnemy = e;
+        }
+      }
+
+      if (boundaryDanger) {
+        protectiveRingMat.color.setHex(PALETTE.playfulCoral);
+        protectiveRingMat.emissive.setHex(PALETTE.playfulCoral);
+      } else {
+        protectiveRingMat.color.setHex(PALETTE.primaryTeal);
+        protectiveRingMat.emissive.setHex(PALETTE.primaryTeal);
+      }
+
+      // 2. Collect Input Frame with Strict Mode Isolation
+      let rawInputFrame = null;
+      if (state.mode === 'vocal') {
+        // Vocal Survival: ONLY Microphone input is allowed to authorize attacks
+        if (micConnected && analyser && micBuffer) {
+          analyser.getFloatTimeDomainData(micBuffer);
+          rawInputFrame = analyzeMicrophoneFrame(micBuffer, audioCtx.sampleRate);
+        }
+      } else if (state.mode === 'piano' || state.mode === 'chord') {
+        // Piano / Chord Survival: Evaluate held piano keys (or microphone if user sings/plays acoustic instrument)
+        rawInputFrame = evaluatePianoInputFrame(enemies);
+        if (!rawInputFrame && micConnected && analyser && micBuffer) {
+          analyser.getFloatTimeDomainData(micBuffer);
+          rawInputFrame = analyzeMicrophoneFrame(micBuffer, audioCtx.sampleRate);
+        }
+      } else {
+        // Practice Mode: Both Piano & Mic active
+        rawInputFrame = evaluatePianoInputFrame(enemies);
+        if (!rawInputFrame && micConnected && analyser && micBuffer) {
+          analyser.getFloatTimeDomainData(micBuffer);
+          rawInputFrame = analyzeMicrophoneFrame(micBuffer, audioCtx.sampleRate);
+        }
+      }
+
+      // 3. Step the Intentional Pitch Matching State Machine
+      const suppressed = audioConfig.selfAudioSuppressionTimer > 0 && state.mode === 'vocal';
+      const stepResult = pitchMatcher.step(dt, rawInputFrame, enemies, suppressed);
+
+      if (stepResult.authorizedEnemy) {
+        launchMusicalPulse(stepResult.authorizedEnemy);
+      }
+
+      // 4. Update Staff Charge Ring & Smoothed Bottom Pitch Feedback UI
+      const progressPct = Math.round(stepResult.progress * 100);
+      document.getElementById('hud-hold-pct').textContent = `${progressPct}%`;
+      document.getElementById('hud-hold-fill').style.width = `${progressPct}%`;
+      document.getElementById('hud-state-msg').textContent = stepResult.statusText;
+      document.getElementById('hud-target').textContent = urgentEnemy ? urgentEnemy.note : '—';
+
+      staffChargeMat.opacity = stepResult.progress;
+      staffChargeRing.scale.setScalar(1.32 - stepResult.progress * 0.35);
+
+      const needle = document.getElementById('meter-needle');
+      if (rawInputFrame && rawInputFrame.isValid) {
+        pitchHistory.push(rawInputFrame);
+        if (pitchHistory.length > 4) pitchHistory.shift();
+        const avgCents = pitchHistory.reduce((acc, f) => acc + (f.cents || 0), 0) / pitchHistory.length;
+        const latest = pitchHistory[pitchHistory.length - 1];
+        const exactOct = document.getElementById('sel-octave-mode').value === 'exact';
+        document.getElementById('hud-detected').textContent = exactOct ? latest.token : latest.displayNote;
+
+        const offsetPct = Math.max(-44, Math.min(44, avgCents * 0.85));
+        needle.style.left = `${50 + offsetPct}%`;
+        needle.className = 'meter-needle ' + (Math.abs(avgCents) <= pitchMatcher.toleranceCents ? 'in-tune' : 'near-tune');
+      } else {
+        if (pitchHistory.length > 0) pitchHistory.shift();
+        if (pitchHistory.length === 0) {
+          document.getElementById('hud-detected').textContent = 'Listening';
+          needle.style.left = '50%';
+          needle.className = 'meter-needle';
+        }
+      }
+
+      // 5. Update Screen-Facing Enemy Badges with 2D Repulsion to Prevent Overlap
+      const badgeNodes = enemies.map(e => {
+        const worldPos = e.root.position.clone();
+        worldPos.y += e.type === 'bass' ? 1.85 : 2.15;
+        const sc = worldToScreen(worldPos);
+        return { enemy: e, x: sc.x, y: sc.y };
+      });
+
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < badgeNodes.length; i++) {
+          for (let j = i + 1; j < badgeNodes.length; j++) {
+            const a = badgeNodes[i];
+            const b = badgeNodes[j];
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            if (Math.abs(dx) < 68 && Math.abs(dy) < 36) {
+              const pushY = (36 - Math.abs(dy)) * 0.55;
+              if (a.y <= b.y) { a.y -= pushY; b.y += pushY; }
+              else { a.y += pushY; b.y -= pushY; }
+            }
+          }
+        }
+      }
+
+      badgeNodes.forEach(({ enemy, x, y }) => {
+        enemy.badge.style.left = `${x}px`;
+        enemy.badge.style.top = `${y}px`;
+        enemy.badge.classList.toggle('urgent', enemy === urgentEnemy);
+        enemy.badge.classList.toggle('attacking', enemy.combatState === 'WINDUP');
+        enemy.badge.classList.toggle('matching', enemy.id === pitchMatcher.targetEnemyId && pitchMatcher.holdElapsed > 0);
+      });
+
+      // 6. Update 3D Projectiles, Trails & Impact Rings
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        p.progress += dt * 5.4;
+        if (p.progress >= 1 || !p.target) {
+          scene.remove(p.mesh);
+          p.trailMeshes.forEach(tm => scene.remove(tm));
+          projectiles.splice(i, 1);
+          if (p.target) defeatEnemy(p.target);
+        } else {
+          const targetPos = p.target.root.position.clone().add(new THREE.Vector3(0, 0.75, 0));
+          p.history.unshift(p.mesh.position.clone());
+          if (p.history.length > 4) p.history.pop();
+
+          p.mesh.position.lerpVectors(p.startPos, targetPos, p.progress);
+          p.mesh.position.y += Math.sin(p.progress * Math.PI) * 0.95;
+
+          p.trailMeshes.forEach((tm, idx) => {
+            const histPos = p.history[Math.min(idx + 1, p.history.length - 1)];
+            tm.position.copy(histPos);
+          });
+        }
+      }
+
+      for (let i = impactRings.length - 1; i >= 0; i--) {
+        const ir = impactRings[i];
+        ir.life -= dt;
+        if (ir.life <= 0) {
+          scene.remove(ir.mesh);
+          impactRings.splice(i, 1);
+        } else {
+          const s = 1 + (0.35 - ir.life) * 4.5;
+          ir.mesh.scale.setScalar(s);
+          ir.mesh.material.opacity = ir.life / 0.35;
+        }
+      }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const pt = particles[i];
+        pt.life -= dt;
+        if (pt.life <= 0) {
+          scene.remove(pt.mesh);
+          particles.splice(i, 1);
+        } else {
+          pt.mesh.position.x += pt.vx * dt;
+          pt.mesh.position.y += pt.vy * dt;
+          pt.mesh.position.z += pt.vz * dt;
+          pt.vy -= 7.8 * dt;
+          pt.mesh.rotation.x += 5 * dt;
+          pt.mesh.scale.setScalar(pt.life / 0.50);
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    /********************************************************************
+     * 9. UI & FLOW CONTROLS
+     ********************************************************************/
+    function clearStage() {
+      stopAllPianoVoices();
+      heldPianoMidis.clear();
+      heldChordName = null;
+      updatePianoKeyVisuals();
+      pitchMatcher.reset();
+
+      enemies.forEach(e => {
+        scene.remove(e.root);
+        e.badge.remove();
+      });
+      enemies.length = 0;
+
+      projectiles.forEach(p => {
+        scene.remove(p.mesh);
+        p.trailMeshes.forEach(tm => scene.remove(tm));
+      });
+      projectiles.length = 0;
+
+      impactRings.forEach(ir => scene.remove(ir.mesh));
+      impactRings.length = 0;
+
+      particles.forEach(pt => scene.remove(pt.mesh));
+      particles.length = 0;
+    }
+
+    function applySettingsToMatcher() {
+      pitchMatcher.toleranceCents = parseInt(document.getElementById('sel-tolerance').value, 10) || 32;
+      pitchMatcher.holdRequiredSec = (parseInt(document.getElementById('sel-hold-ms').value, 10) || 285) / 1000;
+      pitchMatcher.exactOctave = document.getElementById('sel-octave-mode').value === 'exact';
+      audioConfig.referenceA4 = parseFloat(document.getElementById('sel-tuning-a4').value) || 440;
+      const sens = parseInt(document.getElementById('rng-sensitivity').value, 10) || 65;
+      audioConfig.sensitivityMultiplier = 0.4 + (sens / 100) * 1.4;
+      state.reducedMotion = document.getElementById('chk-reduced-motion').checked;
+    }
+
+    async function startNewGame() {
+      playSfx('click');
+      clearStage();
+      applySettingsToMatcher();
+
+      state.hp = state.maxHp;
+      state.damageProtectionTimer = 0;
+      state.score = 0;
+      state.combo = 1;
+      state.bestCombo = 1;
+      state.wave = 1;
+      state.elapsedTime = 0;
+      state.defeatedCount = 0;
+      state.spawnTimer = 0.35;
+      state.running = true;
+      state.paused = false;
+
+      // Isolate UI controls by mode
+      const pianoWrapper = document.getElementById('piano-wrapper');
+      const chordBar = document.getElementById('chord-bar');
+      const modeNames = {
+        vocal: 'Vocal Mic',
+        piano: 'Piano Survival',
+        chord: 'Chord Survival',
+        practice: 'Practice Mode'
+      };
+      document.getElementById('hud-mode-pill').textContent = modeNames[state.mode] || 'Patrol';
+
+      if (state.mode === 'vocal') {
+        pianoWrapper.classList.add('piano-Wrapper-hidden');
+        await connectMicrophone();
+      } else {
+        pianoWrapper.classList.remove('piano-Wrapper-hidden');
+        chordBar.classList.toggle('hidden', state.mode !== 'chord' && state.mode !== 'practice');
+        if (state.mode === 'practice') {
+          connectMicrophone();
+        }
+      }
+
+      document.getElementById('start-modal').classList.add('hidden');
+      document.getElementById('info-modal').classList.add('hidden');
+      document.getElementById('gameover-modal').classList.add('hidden');
+      updateHUD();
+    }
+
+    function triggerGameOver() {
+      state.running = false;
+      stopAllPianoVoices();
+      document.getElementById('res-score').textContent = state.score.toLocaleString();
+      document.getElementById('res-best-score').textContent = (state.bestScores[state.mode] || state.score).toLocaleString();
+      document.getElementById('res-wave').textContent = String(state.wave).padStart(2, '0');
+      document.getElementById('res-combo').textContent = `${state.bestCombo}x`;
+      document.getElementById('gameover-modal').classList.remove('hidden');
+    }
+
+    function togglePause() {
+      if (!state.running) return;
+      state.paused = !state.paused;
+      stopAllPianoVoices();
+      document.getElementById('info-modal').classList.toggle('hidden', !state.paused);
+    }
+
+    // Bind UI Controls
+    document.querySelectorAll('#mode-cards .mode-card').forEach(card => {
+      card.addEventListener('click', () => {
+        playSfx('click');
+        document.querySelectorAll('#mode-cards .mode-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        state.mode = card.dataset.mode;
+      });
+    });
+
+    document.getElementById('btn-mic-test').addEventListener('click', connectMicrophone);
+    document.getElementById('btn-calibrate-noise').addEventListener('click', calibrateRoomNoise);
+    document.getElementById('btn-test-a4').addEventListener('click', () => {
+      applySettingsToMatcher();
+      playReferenceTone(audioConfig.referenceA4, 0.55);
+    });
+
+    document.getElementById('btn-ref-tone').addEventListener('click', () => {
+      // Play reference tone for current urgent enemy while suspending mic scoring
+      let freq = audioConfig.referenceA4;
+      const urgentText = document.getElementById('hud-target').textContent;
+      const parsed = parseNoteToken(urgentText);
+      if (parsed) {
+        const pc = parsed.isChord ? parsed.rootPc : parsed.pitchClass;
+        const oct = parsed.octave || 4;
+        const midi = (oct + 1) * 12 + pc;
+        freq = midiToFreq(midi);
+      }
+      playReferenceTone(freq, 0.50);
+    });
+
+    document.getElementById('chk-show-note-names').addEventListener('change', (e) => {
+      document.getElementById('piano-keyboard').classList.toggle('hide-note-labels', !e.target.checked);
+    });
+
+    document.getElementById('chk-show-key-map').addEventListener('change', (e) => {
+      document.getElementById('piano-keyboard').classList.toggle('hide-bind-labels', !e.target.checked);
+    });
+
+    document.getElementById('rng-sfx-vol').addEventListener('input', (e) => {
+      audioConfig.sfxVolume = parseInt(e.target.value, 10) / 100;
+    });
+
+    document.getElementById('rng-piano-vol').addEventListener('input', (e) => {
+      audioConfig.pianoVolume = parseInt(e.target.value, 10) / 100;
+    });
+
+    document.getElementById('btn-start-game').addEventListener('click', startNewGame);
+    document.getElementById('btn-pause').addEventListener('click', togglePause);
+    document.getElementById('btn-settings').addEventListener('click', () => {
+      if (!state.running) return;
+      state.paused = true;
+      document.getElementById('info-modal').classList.remove('hidden');
+    });
+
+    document.getElementById('btn-resume-game').addEventListener('click', () => {
+      state.paused = false;
+      document.getElementById('info-modal').classList.add('hidden');
+    });
+
+    document.getElementById('btn-open-setup').addEventListener('click', () => {
+      state.running = false;
+      state.paused = false;
+      clearStage();
+      document.getElementById('info-modal').classList.add('hidden');
+      document.getElementById('start-modal').classList.remove('hidden');
+    });
+
+    document.getElementById('btn-restart-from-modal').addEventListener('click', startNewGame);
+    document.getElementById('btn-play-again').addEventListener('click', startNewGame);
+    document.getElementById('btn-change-mode').addEventListener('click', () => {
+      document.getElementById('gameover-modal').classList.add('hidden');
+      document.getElementById('start-modal').classList.remove('hidden');
+    });
+
+    document.getElementById('btn-mute').addEventListener('click', () => {
+      audioConfig.muted = !audioConfig.muted;
+      if (audioConfig.muted) stopAllPianoVoices();
+      document.getElementById('icon-speaker').innerHTML = audioConfig.muted
+        ? '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line>'
+        : '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>';
+    });
+
+    // Expose core validation classes on window for automated verification tests
+    window.__PITCH_PATROL_TEST__ = {
+      PitchMatchStateMachine,
+      parseNoteToken,
+      areTargetsEquivalent,
+      analyzeMicrophoneFrame,
+      evaluatePianoInputFrame,
+      heldPianoMidis,
+      state,
+      audioConfig
+    };
+
+    buildPianoDOM();
+    updateCameraFrustum();
+    updateHUD();
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
