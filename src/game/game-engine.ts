@@ -90,7 +90,9 @@ export class GameEngine {
   private initThree(): void {
     // 1. Scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xA9CEF4); // Cheerful sky
+    { const sc = document.createElement('canvas'); sc.width = 4; sc.height = 256; const sg = sc.getContext('2d')!; const gr = sg.createLinearGradient(0, 0, 0, 256);
+      gr.addColorStop(0, '#6fa8f0'); gr.addColorStop(0.6, '#bfe0fa'); gr.addColorStop(1, '#fff1dc'); sg.fillStyle = gr; sg.fillRect(0, 0, 4, 256);
+      const st = new THREE.CanvasTexture(sc); st.colorSpace = THREE.SRGBColorSpace; this.scene.background = st; }
     this.scene.fog = new THREE.FogExp2(0xA9CEF4, 0.002);
 
     // 2. Camera: 65° Orthographic Top-Down
@@ -117,7 +119,7 @@ export class GameEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.25;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // 4. Subsystems

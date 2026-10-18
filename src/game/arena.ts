@@ -67,12 +67,42 @@ export class Arena {
     crystalMesh.position.y = -7.5;
     this.scene.add(crystalMesh);
 
+    // Painted garden top: radial mint lawn with piano-key style tiles
+    const size = 1024, c = document.createElement('canvas'); c.width = c.height = size;
+    const g = c.getContext('2d')!;
+    const grad = g.createRadialGradient(size/2, size/2, 40, size/2, size/2, size/2);
+    grad.addColorStop(0, '#d9f7e8'); grad.addColorStop(0.55, '#b4e8cf'); grad.addColorStop(1, '#8fd3b4');
+    g.fillStyle = grad; g.fillRect(0, 0, size, size);
+    g.globalAlpha = 0.16; g.fillStyle = '#ffffff';
+    const tile = 64;
+    for (let y = 0; y < size; y += tile) for (let x = 0; x < size; x += tile) if (((x + y) / tile) % 2 === 0) g.fillRect(x, y, tile, tile);
+    g.globalAlpha = 1; g.strokeStyle = '#fff6'; g.lineWidth = 10; g.beginPath(); g.arc(size/2, size/2, size/2 - 12, 0, Math.PI * 2); g.stroke();
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    const topMesh = new THREE.Mesh(new THREE.CircleGeometry(this.stageRadius, 64), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0 }));
+    topMesh.rotation.x = -Math.PI / 2; topMesh.position.y = 0.005; topMesh.receiveShadow = true;
+    this.scene.add(topMesh);
+
+    // Rim flowers and bushes (instanced, cheap)
+    const flowerCount = 70;
+    const flowers = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.45, 1), new THREE.MeshStandardMaterial({ roughness: 0.7 }), flowerCount);
+    const m = new THREE.Matrix4(), col = new THREE.Color();
+    const palette = [0xff8fa3, 0xffd36e, 0xb79bff, 0xffffff, 0x7fe0c8];
+    for (let i = 0; i < flowerCount; i++) {
+      const a = (i / flowerCount) * Math.PI * 2 + Math.sin(i * 12.9) * 0.05;
+      const r = this.stageRadius - 0.9 - (i % 3) * 0.35;
+      const sc = 0.8 + ((i * 37) % 10) / 14;
+      m.compose(new THREE.Vector3(Math.cos(a) * r, 0.3 * sc, Math.sin(a) * r), new THREE.Quaternion(), new THREE.Vector3(sc, sc, sc));
+      flowers.setMatrixAt(i, m); flowers.setColorAt(i, col.setHex(palette[i % palette.length]));
+    }
+    flowers.castShadow = true;
+    this.scene.add(flowers);
+
     // 2. Concentric Musical Grooves
     [6.0, 10.0, 14.0, 18.0, 21.0].forEach(r => {
       const grooveMat = new THREE.MeshBasicMaterial({
         color: 0x36D6C5,
         transparent: true,
-        opacity: 0.16
+        opacity: 0.3
       });
       const ringGeo = new THREE.RingGeometry(r - 0.1, r + 0.1, 64);
       const ringMesh = new THREE.Mesh(ringGeo, grooveMat);
@@ -122,7 +152,7 @@ export class Arena {
   private buildClouds(): void {
     const cloudMat = new THREE.MeshStandardMaterial({
       color: 0xFFFFFF,
-      roughness: 0.85,
+      roughness: 0.85, emissive: 0xFFFFFF, emissiveIntensity: 0.45,
       metalness: 0.0
     });
 
@@ -249,10 +279,10 @@ export class Arena {
   }
 
   private setupLighting(): void {
-    const hemiLight = new THREE.HemisphereLight(0xF7FAFF, 0xA68CFF, 0.8);
+    const hemiLight = new THREE.HemisphereLight(0xFFFFFF, 0x9BB8E8, 0.95);
     this.scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xFFF9E6, 1.25);
+    const dirLight = new THREE.DirectionalLight(0xFFEFD0, 1.6);
     dirLight.position.set(20, 35, 20);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
