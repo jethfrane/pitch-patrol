@@ -9,6 +9,7 @@
 
 import * as THREE from 'three';
 import { NoteBadge } from './badges';
+import { disposeObject3D } from './dispose';
 
 export type EnemyType = 'note-sprite' | 'metronome-runner' | 'bass-blob' | 'chord-cloud';
 export type EnemyState = 'approaching' | 'winding_up' | 'cooldown' | 'dying' | 'defeated';
@@ -419,10 +420,7 @@ export class Enemy {
   }
 
   public destroy(scene: THREE.Scene): void {
-    this.badge.dispose();
-    if (this.alertIcon) {
-      (this.alertIcon.material as THREE.Material).dispose();
-    }
     scene.remove(this.group);
+    disposeObject3D(this.group);
   }
 }

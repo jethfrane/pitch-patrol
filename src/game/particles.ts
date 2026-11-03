@@ -25,18 +25,17 @@ export class ParticleSystem {
   public scene: THREE.Scene;
   private confettiBits: ConfettiBit[] = [];
   private scorePopups: ScorePopup[] = [];
+  private readonly confettiGeometry = new THREE.BoxGeometry(0.12, 0.12, 0.04);
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
   }
 
   public burstConfetti(origin: THREE.Vector3, count = 25): void {
-    const geo = new THREE.BoxGeometry(0.12, 0.12, 0.04);
-
     for (let i = 0; i < count; i++) {
       const color = PALETTE[Math.floor(Math.random() * PALETTE.length)];
       const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = new THREE.Mesh(this.confettiGeometry, mat);
 
       mesh.position.copy(origin);
       mesh.position.y += 0.5;
