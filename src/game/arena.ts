@@ -1,6 +1,6 @@
 /**
- * Pitch Patrol - Expanded Melody Garden 3D Arena
- * Expanded stage radius (22 units), concentric grooves, decorative clouds, and reactive shield ring.
+ * Pitch Patrol - 3D Melody Garden Arena
+ * Layered floating island, instanced 3D flowers, reactive amp towers, clouds, and harmonic charge beam.
  */
 
 import * as THREE from 'three';
@@ -13,108 +13,166 @@ export class Arena {
   public cloudsGroup = new THREE.Group();
   public speakersGroup = new THREE.Group();
   public speakerCones: THREE.Mesh[] = [];
+  public speakerStrips: THREE.Mesh[] = [];
   public floatingNotesGroup = new THREE.Group();
+  private ambientMotes!: THREE.Points;
+  private chargeBeam!: THREE.Mesh;
   private grooveMeshes: THREE.Mesh[] = [];
 
-  // Expanded dimensions
   public readonly stageRadius = 22;
-  public readonly protectiveRadius = 3.6;
+  public readonly protectiveRadius = 3.8;
 
   private damageFlashProgress = 1.0;
+  private hitPulseProgress = 1.0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.buildStage();
     this.buildProtectiveRing();
+    this.buildChargeBeam();
     this.buildClouds();
     this.buildSpeakerTowers();
     this.buildFloatingMusicalNotes();
+    this.buildAmbientMotes();
     this.setupLighting();
   }
 
   private buildStage(): void {
-    // 1. Expanded Floating Ivory Stage
-    const stageGeo = new THREE.CylinderGeometry(this.stageRadius, this.stageRadius + 0.8, 1.4, 64);
+    // Ivory stage disk
+    const stageGeo = new THREE.CylinderGeometry(this.stageRadius, this.stageRadius + 0.85, 1.5, 64);
     const stageMat = new THREE.MeshStandardMaterial({
-      color: 0xEAF4FF, // Soft Ivory
+      color: 0xEAF4FF,
       roughness: 0.35,
-      metalness: 0.05
+      metalness: 0.06
     });
     this.stageMesh = new THREE.Mesh(stageGeo, stageMat);
-    this.stageMesh.position.y = -0.7;
+    this.stageMesh.position.y = -0.75;
     this.stageMesh.receiveShadow = true;
     this.scene.add(this.stageMesh);
 
-    // Gold rim base
-    const baseGeo = new THREE.CylinderGeometry(this.stageRadius + 0.8, this.stageRadius - 2.0, 1.8, 64);
+    // Gold beveled trim
+    const baseGeo = new THREE.CylinderGeometry(this.stageRadius + 0.9, this.stageRadius - 1.8, 1.9, 64);
     const baseMat = new THREE.MeshStandardMaterial({
       color: 0xFFD36E,
-      roughness: 0.4,
-      metalness: 0.2
+      roughness: 0.35,
+      metalness: 0.25
     });
     const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-    baseMesh.position.y = -2.2;
+    baseMesh.position.y = -2.35;
     this.scene.add(baseMesh);
 
-    // Ethereal floating under-crystal
-    const crystalGeo = new THREE.ConeGeometry(this.stageRadius - 3, 9, 8);
+    // Faceted indigo floating island underside crystal
+    const crystalGeo = new THREE.ConeGeometry(this.stageRadius - 2.5, 10, 10);
     const crystalMat = new THREE.MeshStandardMaterial({
-      color: 0x18233F,
-      roughness: 0.6
+      color: 0x1D2E54,
+      roughness: 0.45,
+      metalness: 0.15,
+      flatShading: true
     });
     const crystalMesh = new THREE.Mesh(crystalGeo, crystalMat);
     crystalMesh.rotation.x = Math.PI;
-    crystalMesh.position.y = -7.5;
+    crystalMesh.position.y = -8.2;
     this.scene.add(crystalMesh);
 
-    // Painted garden top: radial mint lawn with piano-key style tiles
-    const size = 1024, c = document.createElement('canvas'); c.width = c.height = size;
+    // Painted garden meadow top texture
+    const size = 1024;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
     const g = c.getContext('2d')!;
-    const grad = g.createRadialGradient(size/2, size/2, 40, size/2, size/2, size/2);
-    grad.addColorStop(0, '#d9f7e8'); grad.addColorStop(0.55, '#b4e8cf'); grad.addColorStop(1, '#8fd3b4');
-    g.fillStyle = grad; g.fillRect(0, 0, size, size);
-    g.globalAlpha = 0.16; g.fillStyle = '#ffffff';
+    const grad = g.createRadialGradient(size / 2, size / 2, 48, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, '#DFF9EC');
+    grad.addColorStop(0.55, '#B7EAD2');
+    grad.addColorStop(1, '#84CFAF');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+
+    g.globalAlpha = 0.16;
+    g.fillStyle = '#FFFFFF';
     const tile = 64;
-    for (let y = 0; y < size; y += tile) for (let x = 0; x < size; x += tile) if (((x + y) / tile) % 2 === 0) g.fillRect(x, y, tile, tile);
-    g.globalAlpha = 1; g.strokeStyle = '#fff6'; g.lineWidth = 10; g.beginPath(); g.arc(size/2, size/2, size/2 - 12, 0, Math.PI * 2); g.stroke();
-    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
-    const topMesh = new THREE.Mesh(new THREE.CircleGeometry(this.stageRadius, 64), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0 }));
-    topMesh.rotation.x = -Math.PI / 2; topMesh.position.y = 0.005; topMesh.receiveShadow = true;
+    for (let y = 0; y < size; y += tile) {
+      for (let x = 0; x < size; x += tile) {
+        if (((x + y) / tile) % 2 === 0) g.fillRect(x, y, tile, tile);
+      }
+    }
+    g.globalAlpha = 1;
+    g.strokeStyle = 'rgba(255,255,255,0.55)';
+    g.lineWidth = 12;
+    g.beginPath();
+    g.arc(size / 2, size / 2, size / 2 - 14, 0, Math.PI * 2);
+    g.stroke();
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    const topMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(this.stageRadius, 64),
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85, metalness: 0 })
+    );
+    topMesh.rotation.x = -Math.PI / 2;
+    topMesh.position.y = 0.01;
+    topMesh.receiveShadow = true;
     this.scene.add(topMesh);
 
-    // Rim flowers and bushes (instanced, cheap)
-    const flowerCount = 70;
-    const flowers = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.45, 1), new THREE.MeshStandardMaterial({ roughness: 0.7 }), flowerCount);
-    const m = new THREE.Matrix4(), col = new THREE.Color();
-    const palette = [0xff8fa3, 0xffd36e, 0xb79bff, 0xffffff, 0x7fe0c8];
-    for (let i = 0; i < flowerCount; i++) {
-      const a = (i / flowerCount) * Math.PI * 2 + Math.sin(i * 12.9) * 0.05;
-      const r = this.stageRadius - 0.9 - (i % 3) * 0.35;
-      const sc = 0.8 + ((i * 37) % 10) / 14;
-      m.compose(new THREE.Vector3(Math.cos(a) * r, 0.3 * sc, Math.sin(a) * r), new THREE.Quaternion(), new THREE.Vector3(sc, sc, sc));
-      flowers.setMatrixAt(i, m); flowers.setColorAt(i, col.setHex(palette[i % palette.length]));
-    }
-    flowers.castShadow = true;
-    this.scene.add(flowers);
+    // Instanced 3D Rim Bushes + Flower Petals + Golden Centers (3 draw calls total)
+    const flowerCount = 56;
+    const bushGeo = new THREE.DodecahedronGeometry(0.42, 0);
+    const blossomGeo = new THREE.CylinderGeometry(0.32, 0.18, 0.18, 5);
+    const centerGeo = new THREE.SphereGeometry(0.13, 8, 8);
 
-    // 2. Concentric Musical Grooves
-    [6.0, 10.0, 14.0, 18.0, 21.0].forEach(r => {
+    const bushes = new THREE.InstancedMesh(bushGeo, new THREE.MeshStandardMaterial({ color: 0x62C39C, roughness: 0.75 }), flowerCount);
+    const blossoms = new THREE.InstancedMesh(blossomGeo, new THREE.MeshStandardMaterial({ roughness: 0.45 }), flowerCount);
+    const centers = new THREE.InstancedMesh(centerGeo, new THREE.MeshStandardMaterial({ color: 0xFFD36E, emissive: 0xFFB703, emissiveIntensity: 0.25 }), flowerCount);
+
+    const mat4 = new THREE.Matrix4();
+    const quat = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    const col = new THREE.Color();
+    const palette = [0xFF8493, 0xA68CFF, 0xFFFFFF, 0xFFD36E, 0x7FE0C8];
+
+    for (let i = 0; i < flowerCount; i++) {
+      const a = (i / flowerCount) * Math.PI * 2 + Math.sin(i * 11.7) * 0.04;
+      const r = this.stageRadius - 0.85 - (i % 2) * 0.35;
+      const sc = 0.85 + ((i * 37) % 10) / 18;
+      const fx = Math.cos(a) * r;
+      const fz = Math.sin(a) * r;
+
+      pos.set(fx, 0.22 * sc, fz);
+      scale.set(sc * 1.15, sc * 0.72, sc * 1.15);
+      mat4.compose(pos, quat, scale);
+      bushes.setMatrixAt(i, mat4);
+
+      pos.set(fx, 0.48 * sc, fz);
+      scale.set(sc, sc, sc);
+      mat4.compose(pos, quat, scale);
+      blossoms.setMatrixAt(i, mat4);
+      blossoms.setColorAt(i, col.setHex(palette[i % palette.length]));
+
+      pos.set(fx, 0.56 * sc, fz);
+      mat4.compose(pos, quat, scale);
+      centers.setMatrixAt(i, mat4);
+    }
+    bushes.castShadow = true;
+    blossoms.castShadow = true;
+    this.scene.add(bushes, blossoms, centers);
+
+    // Concentric musical grooves
+    [6.5, 10.5, 14.5, 18.5].forEach(r => {
       const grooveMat = new THREE.MeshBasicMaterial({
-        color: 0x36D6C5,
+        color: 0x20BFA9,
         transparent: true,
-        opacity: 0.3
+        opacity: 0.22
       });
-      const ringGeo = new THREE.RingGeometry(r - 0.1, r + 0.1, 64);
+      const ringGeo = new THREE.RingGeometry(r - 0.08, r + 0.08, 64);
       const ringMesh = new THREE.Mesh(ringGeo, grooveMat);
       ringMesh.rotation.x = -Math.PI / 2;
-      ringMesh.position.y = 0.01;
+      ringMesh.position.y = 0.02;
       this.grooveMeshes.push(ringMesh);
       this.scene.add(ringMesh);
     });
   }
 
   private buildProtectiveRing(): void {
-    // Inner glowing sanctuary disk
     const diskGeo = new THREE.CircleGeometry(this.protectiveRadius, 64);
     const diskMat = new THREE.MeshBasicMaterial({
       color: 0x36D6C5,
@@ -124,63 +182,99 @@ export class Arena {
     });
     this.protectiveRingMesh = new THREE.Mesh(diskGeo, diskMat);
     this.protectiveRingMesh.rotation.x = -Math.PI / 2;
-    this.protectiveRingMesh.position.y = 0.02;
+    this.protectiveRingMesh.position.y = 0.03;
     this.scene.add(this.protectiveRingMesh);
 
-    // Glowing boundary line
     const points: THREE.Vector3[] = [];
     const segments = 64;
     for (let i = 0; i <= segments; i++) {
       const theta = (i / segments) * Math.PI * 2;
       points.push(new THREE.Vector3(
         Math.cos(theta) * this.protectiveRadius,
-        0.04,
+        0.05,
         Math.sin(theta) * this.protectiveRadius
       ));
     }
     const boundaryGeo = new THREE.BufferGeometry().setFromPoints(points);
     const boundaryMat = new THREE.LineBasicMaterial({
       color: 0x36D6C5,
-      linewidth: 3,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.88
     });
     this.protectiveBoundaryMesh = new THREE.LineLoop(boundaryGeo, boundaryMat);
     this.scene.add(this.protectiveBoundaryMesh);
   }
 
+  private buildChargeBeam(): void {
+    const beamGeo = new THREE.CylinderGeometry(0.11, 0.22, 1, 10, 1, true);
+    beamGeo.translate(0, 0.5, 0);
+    beamGeo.rotateX(Math.PI / 2);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xFFD36E,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    this.chargeBeam = new THREE.Mesh(beamGeo, beamMat);
+    this.chargeBeam.visible = false;
+    this.scene.add(this.chargeBeam);
+  }
+
+  public updateChargeBeam(startPos: THREE.Vector3, targetPos: THREE.Vector3 | null, progress: number): void {
+    const mat = this.chargeBeam.material as THREE.MeshBasicMaterial;
+    if (!targetPos || progress <= 0.05) {
+      this.chargeBeam.visible = false;
+      mat.opacity = 0;
+      return;
+    }
+
+    const end = targetPos.clone();
+    end.y = 1.05;
+    const dist = startPos.distanceTo(end);
+    if (dist < 0.2) {
+      this.chargeBeam.visible = false;
+      return;
+    }
+
+    this.chargeBeam.visible = true;
+    this.chargeBeam.position.copy(startPos);
+    this.chargeBeam.lookAt(end);
+    const thickness = 0.5 + progress * 0.9;
+    this.chargeBeam.scale.set(thickness, thickness, dist);
+    mat.opacity = 0.25 + progress * 0.6;
+  }
+
   private buildClouds(): void {
     const cloudMat = new THREE.MeshStandardMaterial({
       color: 0xFFFFFF,
-      roughness: 0.85, emissive: 0xFFFFFF, emissiveIntensity: 0.45,
+      roughness: 0.8,
+      emissive: 0xEAF4FF,
+      emissiveIntensity: 0.35,
       metalness: 0.0
     });
 
-    // 16 cloud puffs around the perimeter
-    for (let i = 0; i < 16; i++) {
-      const angle = (i / 16) * Math.PI * 2 + (Math.random() * 0.15);
-      const dist = this.stageRadius + 6 + Math.random() * 5;
+    for (let i = 0; i < 14; i++) {
+      const angle = (i / 14) * Math.PI * 2 + (Math.random() * 0.14);
+      const dist = this.stageRadius + 7.2 + Math.random() * 5.0;
       const cloudPuffGroup = new THREE.Group();
 
-      const numSpheres = 4 + Math.floor(Math.random() * 4);
+      const numSpheres = 4 + (i % 3);
       for (let j = 0; j < numSpheres; j++) {
-        const r = 1.6 + Math.random() * 2.0;
-        const sphereGeo = new THREE.SphereGeometry(r, 16, 16);
+        const r = 1.5 + ((j * 7 + i) % 5) * 0.35;
+        const sphereGeo = new THREE.SphereGeometry(r, 12, 10);
         const sphereMesh = new THREE.Mesh(sphereGeo, cloudMat);
         sphereMesh.position.set(
-          (j - numSpheres / 2) * 1.5,
-          (Math.random() - 0.5) * 1.0,
-          (Math.random() - 0.5) * 1.5
+          (j - numSpheres / 2) * 1.45,
+          ((j % 2) - 0.5) * 0.65,
+          ((i + j) % 2 - 0.5) * 1.1
         );
-        sphereMesh.castShadow = true;
         cloudPuffGroup.add(sphereMesh);
       }
 
-      cloudPuffGroup.position.set(
-        Math.cos(angle) * dist,
-        -1.5 + Math.sin(i) * 1.5,
-        Math.sin(angle) * dist
-      );
+      const baseY = -1.8 + Math.sin(i * 1.7) * 1.6;
+      cloudPuffGroup.position.set(Math.cos(angle) * dist, baseY, Math.sin(angle) * dist);
+      cloudPuffGroup.userData = { baseY, angle, dist, speed: 0.015 + (i % 3) * 0.006 };
       this.cloudsGroup.add(cloudPuffGroup);
     }
 
@@ -189,41 +283,58 @@ export class Arena {
 
   private buildSpeakerTowers(): void {
     const angles = [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75];
-    const towerDist = this.stageRadius + 1.8;
+    const towerDist = this.stageRadius + 2.0;
 
-    const towerMat = new THREE.MeshStandardMaterial({
-      color: 0xA68CFF, // Lavender
-      roughness: 0.3
-    });
-    const coneMat = new THREE.MeshStandardMaterial({
-      color: 0x18233F,
-      roughness: 0.5
-    });
+    const towerMat = new THREE.MeshStandardMaterial({ color: 0x8F7CE8, roughness: 0.28, metalness: 0.12 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0xFFD36E, roughness: 0.25, metalness: 0.55 });
+    const coneMat = new THREE.MeshStandardMaterial({ color: 0x18233F, roughness: 0.45 });
 
     angles.forEach(ang => {
       const tower = new THREE.Group();
 
-      const cabinetGeo = new THREE.CylinderGeometry(1.6, 1.9, 4.5, 16);
-      const cabinet = new THREE.Mesh(cabinetGeo, towerMat);
+      // Main cabinet
+      const cabinet = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.85, 4.6, 8), towerMat);
       cabinet.castShadow = true;
       tower.add(cabinet);
 
-      // Two bouncing speaker cones
-      for (let y = -0.9; y <= 0.9; y += 1.8) {
-        const coneGeo = new THREE.CylinderGeometry(0.7, 0.25, 0.5, 16);
-        const cone = new THREE.Mesh(coneGeo, coneMat);
+      // Gold top crown ring
+      const crown = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.11, 8, 20), trimMat);
+      crown.rotation.x = Math.PI / 2;
+      crown.position.y = 2.3;
+      tower.add(crown);
+
+      // Glowing teal equalizer strip
+      const stripMat = new THREE.MeshStandardMaterial({
+        color: 0x36D6C5,
+        emissive: 0x36D6C5,
+        emissiveIntensity: 0.7
+      });
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.2, 0.18), stripMat);
+      strip.position.set(0, 0, 1.55);
+      tower.add(strip);
+      this.speakerStrips.push(strip);
+
+      // Floating glowing beacon orb above tower crown
+      const orb = new THREE.Mesh(new THREE.OctahedronGeometry(0.42, 0), stripMat);
+      orb.position.set(0, 3.05, 0);
+      tower.add(orb);
+      this.speakerStrips.push(orb);
+
+      // Two front-facing speaker cones with gold bezels
+      for (let y = -0.85; y <= 0.85; y += 1.7) {
+        const bezel = new THREE.Mesh(new THREE.TorusGeometry(0.68, 0.08, 8, 18), trimMat);
+        bezel.position.set(0, y, 1.48);
+        tower.add(bezel);
+
+        const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.24, 0.45, 16), coneMat);
         cone.rotation.x = Math.PI / 2;
-        cone.position.set(0, y, 1.35);
+        cone.position.set(0, y, 1.38);
         tower.add(cone);
         this.speakerCones.push(cone);
       }
 
-      tower.position.set(
-        Math.cos(ang) * towerDist,
-        1.6,
-        Math.sin(ang) * towerDist
-      );
-      tower.lookAt(0, 1.6, 0);
+      tower.position.set(Math.cos(ang) * towerDist, 1.7, Math.sin(ang) * towerDist);
+      tower.lookAt(0, 1.7, 0);
       this.speakersGroup.add(tower);
     });
 
@@ -234,7 +345,7 @@ export class Arena {
     const symbols = ['♪', '♫', '♩', '♬'];
     const colors = ['#FFD36E', '#A68CFF', '#36D6C5', '#FF8493'];
     const count = 10;
-    const radius = this.stageRadius + 3.2;
+    const radius = this.stageRadius + 3.4;
 
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * Math.PI * 2;
@@ -254,42 +365,55 @@ export class Arena {
       ctx.fillText(char, 64, 64);
 
       const texture = new THREE.CanvasTexture(canvas);
-      const spriteMat = new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-        opacity: 0.85
-      });
+      const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0.9 });
       const sprite = new THREE.Sprite(spriteMat);
-      const baseY = 2.0 + (i % 3) * 0.8;
-      sprite.scale.set(1.6, 1.6, 1);
-      sprite.position.set(
-        Math.cos(angle) * radius,
-        baseY,
-        Math.sin(angle) * radius
-      );
-      sprite.userData = {
-        baseY,
-        angle,
-        offset: i * 0.7
-      };
+      const baseY = 2.4 + (i % 3) * 0.9;
+      sprite.scale.set(1.75, 1.75, 1);
+      sprite.position.set(Math.cos(angle) * radius, baseY, Math.sin(angle) * radius);
+      sprite.userData = { baseY, angle, offset: i * 0.7 };
       this.floatingNotesGroup.add(sprite);
     }
 
     this.scene.add(this.floatingNotesGroup);
   }
 
+  private buildAmbientMotes(): void {
+    const count = 90;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = 4 + Math.random() * (this.stageRadius + 6);
+      positions[i * 3] = Math.cos(angle) * r;
+      positions[i * 3 + 1] = 0.5 + Math.random() * 9.0;
+      positions[i * 3 + 2] = Math.sin(angle) * r;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xFFFFFF,
+      size: 0.28,
+      transparent: true,
+      opacity: 0.55
+    });
+    this.ambientMotes = new THREE.Points(geo, mat);
+    this.scene.add(this.ambientMotes);
+  }
+
   private setupLighting(): void {
-    const hemiLight = new THREE.HemisphereLight(0xFFFFFF, 0x9BB8E8, 0.95);
+    const hemiLight = new THREE.HemisphereLight(0xFFFFFF, 0x8BAEE8, 1.0);
     this.scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0xFFEFD0, 1.6);
-    dirLight.position.set(20, 35, 20);
+    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+    const shadowRes = isMobile ? 1024 : 2048;
+
+    const dirLight = new THREE.DirectionalLight(0xFFF3D6, 1.65);
+    dirLight.position.set(22, 36, 24);
     dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
-    dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 80;
-    const d = 26;
+    dirLight.shadow.mapSize.width = shadowRes;
+    dirLight.shadow.mapSize.height = shadowRes;
+    dirLight.shadow.camera.near = 1;
+    dirLight.shadow.camera.far = 90;
+    const d = 27;
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
@@ -297,8 +421,8 @@ export class Arena {
     dirLight.shadow.bias = -0.0005;
     this.scene.add(dirLight);
 
-    const rimLight = new THREE.DirectionalLight(0x36D6C5, 0.45);
-    rimLight.position.set(-20, 15, -20);
+    const rimLight = new THREE.DirectionalLight(0x36D6C5, 0.55);
+    rimLight.position.set(-22, 16, -22);
     this.scene.add(rimLight);
   }
 
@@ -306,50 +430,71 @@ export class Arena {
     this.damageFlashProgress = 0.0;
   }
 
+  public triggerHitPulse(): void {
+    this.hitPulseProgress = 0.0;
+  }
+
   public update(time: number, isThreatNear = false, dt = 0.016): void {
-    // Cloud bobbing
+    // Cloud drift & bobbing
     for (let i = 0; i < this.cloudsGroup.children.length; i++) {
       const puff = this.cloudsGroup.children[i];
-      puff.position.y += Math.sin(time * 0.8 + i) * 0.002;
+      const ud = puff.userData;
+      const a = ud.angle + time * ud.speed;
+      puff.position.x = Math.cos(a) * ud.dist;
+      puff.position.z = Math.sin(a) * ud.dist;
+      puff.position.y = ud.baseY + Math.sin(time * 0.9 + i) * 0.35;
     }
 
-    // Floating musical note decor bobbing and slow drift
+    // Floating note icons
     for (let i = 0; i < this.floatingNotesGroup.children.length; i++) {
       const note = this.floatingNotesGroup.children[i];
       const ud = note.userData;
-      note.position.y = ud.baseY + Math.sin(time * 1.8 + ud.offset) * 0.35;
+      note.position.y = ud.baseY + Math.sin(time * 1.9 + ud.offset) * 0.4;
     }
 
-    // Concentric grooves beat pulse
+    // Ambient motes rotation
+    this.ambientMotes.rotation.y = time * 0.04;
+
+    // Hit pulse decay on speaker strips & grooves
+    let pulseBoost = 0;
+    if (this.hitPulseProgress < 1.0) {
+      this.hitPulseProgress = Math.min(1.0, this.hitPulseProgress + dt * 4.5);
+      pulseBoost = 1.0 - this.hitPulseProgress;
+    }
+
     this.grooveMeshes.forEach((mesh, idx) => {
       const mat = mesh.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.12 + Math.sin(time * 3 + idx * 0.6) * 0.05;
+      mat.opacity = 0.14 + Math.sin(time * 3 + idx * 0.7) * 0.05 + pulseBoost * 0.25;
+      mat.color.setHex(pulseBoost > 0.2 ? 0xFFD36E : 0x20BFA9);
     });
 
-    // Speaker woofers pulse
-    const beatPulse = 1.0 + Math.sin(time * 6) * 0.08;
+    const beatPulse = 1.0 + Math.sin(time * 6.5) * 0.08 + pulseBoost * 0.22;
     this.speakerCones.forEach(cone => {
       cone.scale.set(beatPulse, 1, beatPulse);
+    });
+    this.speakerStrips.forEach(strip => {
+      const mat = strip.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 0.65 + pulseBoost * 1.8;
+      mat.emissive.setHex(pulseBoost > 0.3 ? 0xFFD36E : 0x36D6C5);
     });
 
     const boundaryMat = this.protectiveBoundaryMesh.material as THREE.LineBasicMaterial;
     const diskMat = this.protectiveRingMesh.material as THREE.MeshBasicMaterial;
 
-    // Damage flash reaction
     if (this.damageFlashProgress < 1.0) {
       this.damageFlashProgress += dt * 3.5;
-      boundaryMat.color.setHex(0xFF8493); // Flash coral/red
-      diskMat.color.setHex(0xFF8493);
-      diskMat.opacity = 0.4 * (1.0 - this.damageFlashProgress);
+      boundaryMat.color.setHex(0xFF5C72);
+      diskMat.color.setHex(0xFF5C72);
+      diskMat.opacity = 0.45 * (1.0 - this.damageFlashProgress);
     } else if (isThreatNear) {
       const flash = (Math.sin(time * 12) + 1) * 0.5;
-      boundaryMat.color.setHex(flash > 0.5 ? 0xFF8493 : 0xFFD36E);
-      diskMat.color.setHex(0xFF8493);
-      diskMat.opacity = 0.22 + flash * 0.12;
+      boundaryMat.color.setHex(flash > 0.5 ? 0xFF5C72 : 0xFFD36E);
+      diskMat.color.setHex(0xFF5C72);
+      diskMat.opacity = 0.22 + flash * 0.14;
     } else {
-      boundaryMat.color.setHex(0x36D6C5);
+      boundaryMat.color.setHex(pulseBoost > 0.25 ? 0xFFD36E : 0x36D6C5);
       diskMat.color.setHex(0x36D6C5);
-      diskMat.opacity = 0.14 + Math.sin(time * 2) * 0.03;
+      diskMat.opacity = 0.14 + Math.sin(time * 2.2) * 0.03 + pulseBoost * 0.12;
     }
   }
 }

@@ -6,15 +6,19 @@
 
 ## Play
 
-Choose microphone or on-screen piano, then survival or no-damage practice. In vocal mode, hum or sing the note above a creature and hold it steadily. Any octave of the displayed pitch class is accepted. A confirmed note fires one musical pulse at the most urgent matching creature. You have 100 health in survival.
+Choose **Sing** (microphone) or **Piano**, then survival or no-damage practice. In vocal mode, hum or sing the note above a creature and hold it steadily. Any octave of the displayed pitch class is accepted. A confirmed note fires one musical pulse at the most urgent matching creature, applying knockback, flashing impact lights, and charging your **Harmonic Nova** skill.
 
-In piano mode, hold one key for 320 ms. Tap the on-screen keyboard on mobile, or use A W S E D F T G Y H U J K on a computer. Note names and key hints are optional. Multiple simultaneous inputs do not count as a single-note answer. Piano and microphone scoring are isolated.
+In piano mode, hold one key for 280 ms. Tap the on-screen keyboard on mobile, or use A W S E D F T G Y H U J K on a computer. Note names and key hints are toggleable. Multiple simultaneous inputs do not count as a single-note answer. Piano and microphone scoring are isolated.
 
-Practice mode includes a reference tone and disables damage. Listening to a reference tone temporarily suspends microphone scoring. Sound effects are off by default in vocal mode to reduce speaker leakage; piano mode enables sound. Headphones are recommended.
+Hit streaks build your combo multiplier (`×1.0` to `×4.0`) and charge **Harmonic Nova** (`Space` or tap the **NOVA** button when ready) to unleash a stage-wide shockwave that knocks back all threats, damages armored creatures and Maestro bosses, and restores +10 health in survival.
 
-## Microphone setup
+Practice mode includes a **Hear** reference tone and disables damage. Listening to a reference tone temporarily suspends microphone scoring. Sound effects are off by default in vocal mode to reduce speaker leakage; piano mode enables sound. Headphones are recommended.
 
-Use HTTPS or localhost and allow microphone permission after pressing Start. Open Settings for input selection, a live signal meter, room-noise calibration, sensitivity, pitch tolerance, and diagnostics. Stay quiet during calibration, then test a comfortable hum. Changing sensitivity changes the input gate; it does not change the target tuning. Reference tuning is A4 = 440 Hz.
+## Microphone & mobile audio setup
+
+Use HTTPS or localhost and allow microphone permission after pressing Start. Pitch Patrol shares a single Web Audio context across synthesis and pitch analysis and manages `navigator.audioSession` transitions (`play-and-record` during active vocal runs; restored to `playback` when switching to piano, ending a run, or hiding the page) to prevent iOS Safari from staying locked in low-volume earpiece/call mode.
+
+Open Settings for input selection, a live signal meter, room-noise calibration, sensitivity (`0.5×`–`5.0×`), pitch tolerance, echo/call filter toggle, **Reset audio output**, and diagnostics. Stay quiet during calibration, then test a comfortable hum. Reference tuning is A4 = 440 Hz.
 
 The game requests automatic gain, noise suppression, and echo cancellation off where supported. Diagnostics report what the browser exposes. Operating-system, Bluetooth, and hardware processing may still affect input. If a device disappears or input is interrupted, the run pauses. Choose an input and reconnect before resuming.
 
